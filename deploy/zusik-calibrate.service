@@ -1,0 +1,20 @@
+# 템플릿 — bash deploy/setup_service.sh 가 placeholder 치환 후 설치.
+# zusik-calibrate.timer 가 주 1회(일요일, 장 마감) 호출하는 oneshot.
+# 다년 일봉 walk-forward 로 청산 파라미터(profit_ladder/breakeven_*) 재학습 →
+# data/learned_params.json 갱신. 봇은 tick 의 _refresh_learned_params 로 재시작 없이 반영.
+# 무거워서(네트워크 + 수년치 백테스트) 부팅을 막지 않도록 timer 전용 + 저우선순위.
+[Unit]
+Description=Zusik calibration (relearn exit params from multi-year history)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+Environment="PATH=__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=__PY__ __DIR__/scripts/calibrate_from_history.py
+TimeoutStartSec=1800
+Nice=10
+StandardOutput=journal
+StandardError=journal

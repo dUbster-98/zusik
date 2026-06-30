@@ -1,0 +1,13 @@
+# 템플릿 — bash deploy/setup_service.sh 가 placeholder 치환 후 설치.
+# zusik.service 의 OnFailure 가 호출하는 oneshot. 메인이 죽은 직후 즉시 webhook 알림.
+[Unit]
+Description=Zusik failure notifier (OnFailure hook)
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+Environment="PATH=__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=__PY__ __DIR__/scripts/notify_failure.py "봇 비정상 종료 — systemd 재시작 시도 중"
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,14 @@
+# 템플릿 — bash deploy/setup_service.sh 가 설치(치환 불요, 고정 내용).
+# 매주 일요일 08:00(KR/US 둘 다 장 마감 — 안전)에 청산 파라미터 재학습.
+# Persistent=true: 그 시각에 꺼져 있었으면 부팅 후 1회 보충 실행. 메인 봇과 독립.
+# 청산 파라미터는 다년 walk-forward 라 천천히 변해 주 1회로 충분(stale 갭 차단이 목적).
+[Unit]
+Description=Zusik calibration timer (weekly, Sunday off-market)
+
+[Timer]
+OnCalendar=Sun *-*-* 08:00:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

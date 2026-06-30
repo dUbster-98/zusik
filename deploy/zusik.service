@@ -1,0 +1,64 @@
+[Unit]
+Description=Zusik AI Stock Trading Bot
+After=network-online.target
+Wants=network-online.target
+# 비정상 종료/실패 시 즉시 알림 (메인 죽은 상태 → webhook 직접 전송 oneshot)
+OnFailure=zusik-notify-failure.service
+
+# ──────────────────────────────────────────────────────────────────────────
+# 이 파일은 템플릿입니다. __USER__ / __DIR__ / __HOME__ / __PY__ 는 설치 시
+# `bash deploy/setup_service.sh` 가 현재 환경값으로 자동 치환합니다.
+# 직접 cp 하지 말고 setup_service.sh 로 설치하세요 (어떤 PC/사용자에서도 동작).
+# ──────────────────────────────────────────────────────────────────────────
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+Environment="PATH=__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStartPre=__PY__ __DIR__/tests/test_bot.py
+ExecStart=__PY__ __DIR__/main.py
+Restart=always
+RestartSec=10
+
+StartLimitIntervalSec=3600
+StartLimitBurst=10
+
+# 환경변수: python-dotenv 가 .env(권한 600)를 직접 로드 → EnvironmentFile 불필요
+
+# 로그 — stdout/stderr 는 journald 로 (journalctl -u zusik -f). 파일 로그는 앱 로거가
+# 직접 관리(logs/bot.log 자정 회전 + errors.log + decisions.log). systemd append 로 같은
+# 파일을 동시에 쓰면 충돌/무한증가하므로 journal 로 위임한다.
+StandardOutput=journal
+StandardError=journal
+
+# 메모리
+MemoryMax=8G
+
+# ── 보안 샌드박싱 ──
+# 홈 디렉토리 외 쓰기 금지 (레포 디렉터리 + 캐시 + /tmp 만 허용)
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=__DIR__ __HOME__/.cache /tmp
+
+# 커널/하드웨어 접근 차단
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+
+# 네트워크 외 디바이스 접근 차단
+PrivateDevices=false
+
+# /tmp 격리
+PrivateTmp=false
+
+# 권한 상승 금지
+NoNewPrivileges=true
+
+# 불필요한 시스템콜 차단
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

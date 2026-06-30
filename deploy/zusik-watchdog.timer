@@ -1,0 +1,12 @@
+# 템플릿 — bash deploy/setup_service.sh 가 설치(치환 불요, 고정 내용).
+# 부팅 2분 후부터 5분 간격으로 zusik-watchdog.service 실행. 메인과 독립 → 메인이 죽어도 동작.
+[Unit]
+Description=Zusik watchdog timer (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

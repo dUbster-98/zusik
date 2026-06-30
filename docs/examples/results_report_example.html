@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>투자결과 리포트</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f6f8fa; color: #1f2328;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans CJK KR", Roboto, sans-serif; line-height: 1.5; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 48px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 12px; margin-bottom: 20px; }
+  .head h1 { font-size: 20px; margin: 0; font-weight: 700; }
+  .head .sub { color: #656d76; font-size: 13px; }
+  .hero { text-align: center; padding: 22px 0 26px; }
+  .hero .label { color: #656d76; font-size: 13px; letter-spacing: .04em; }
+  .hero .ret { font-size: 52px; font-weight: 800; color: #1a7f37; line-height: 1.1; margin-top: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 10px; padding: 14px 16px; }
+  .card .k { color: #656d76; font-size: 12px; margin-bottom: 5px; }
+  .card .v { font-size: 18px; font-weight: 700; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff;
+    border: 1px solid #d0d7de; border-radius: 10px; overflow: hidden; font-size: 13px; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid #d0d7de; }
+  th { background: #f0f3f6; color: #656d76; font-weight: 600; text-align: left; }
+  tr:last-child td { border-bottom: none; }
+  .foot { margin-top: 26px; color: #656d76; font-size: 12px; text-align: center; }
+  .gen { margin-top: 4px; }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } .hero .ret { font-size: 40px; } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>투자결과 종합 리포트</h1>
+      <div class="sub">2024-01-02 ~ 2024-01-31 (21일)</div>
+    </div>
+    <div class="hero">
+      <div class="label">실효 누적 수익률 (입금 대비)</div>
+      <div class="ret">+6.50%</div>
+    </div>
+    <div class="grid">
+<div class="card"><div class="k">현재 실효자산</div><div class="v" style="color:#1f2328">10,650,000원</div></div>
+<div class="card"><div class="k">누적 입금</div><div class="v" style="color:#1f2328">10,000,000원</div></div>
+<div class="card"><div class="k">실현손익(누적)</div><div class="v" style="color:#1a7f37">+520,000원</div></div>
+<div class="card"><div class="k">미실현(평가)</div><div class="v" style="color:#1a7f37">+130,000원</div></div>
+<div class="card"><div class="k">실효 순수익</div><div class="v" style="color:#1a7f37">+650,000원</div></div>
+<div class="card"><div class="k">최대 낙폭(MaxDD)</div><div class="v" style="color:#cf222e">-4.20%</div></div>
+<div class="card"><div class="k">승률</div><div class="v" style="color:#656d76">69.4% (25/36)</div></div>
+<div class="card"><div class="k">매수 / 매도</div><div class="v" style="color:#656d76">40 / 36 건</div></div>
+    </div>
+
+    <h2>종목별 손익 (어떤 종목이 벌었나)</h2>
+    <table>
+      <tr><th>종목</th><th style="text-align:right">매도건수</th><th style="text-align:right">승률</th><th style="text-align:right">총 손익</th></tr>
+      <tr><td>예시 종목 A <span style="color:#656d76">(000001)</span></td><td style="text-align:right">8</td><td style="text-align:right">88%</td><td style="color:#1a7f37;text-align:right">+240,000원</td></tr>
+      <tr><td>예시 종목 B <span style="color:#656d76">(000002)</span></td><td style="text-align:right">6</td><td style="text-align:right">83%</td><td style="color:#1a7f37;text-align:right">+160,000원</td></tr>
+      <tr><td>Example Co <span style="color:#656d76">(DEMO)</span></td><td style="text-align:right">7</td><td style="text-align:right">71%</td><td style="color:#1a7f37;text-align:right">+110,000원</td></tr>
+      <tr><td>예시 종목 C <span style="color:#656d76">(000003)</span></td><td style="text-align:right">5</td><td style="text-align:right">80%</td><td style="color:#1a7f37;text-align:right">+70,000원</td></tr>
+      <tr><td>예시 종목 D <span style="color:#656d76">(000004)</span></td><td style="text-align:right">4</td><td style="text-align:right">25%</td><td style="color:#cf222e;text-align:right">-60,000원</td></tr>
+    </table>
+
+    <h2>월별 성과</h2>
+    <table>
+      <tr><th>월</th><th style="text-align:right">수익률</th><th style="text-align:right">실현손익</th><th style="text-align:right">최대낙폭</th></tr>
+      <tr><td>2023-12</td><td style="color:#1a7f37;text-align:right">+1.80%</td><td style="color:#1a7f37;text-align:right">+150,000원</td><td style="color:#cf222e;text-align:right">-3.10%</td></tr>
+      <tr><td>2024-01</td><td style="color:#1a7f37;text-align:right">+4.60%</td><td style="color:#1a7f37;text-align:right">+370,000원</td><td style="color:#cf222e;text-align:right">-4.20%</td></tr>
+    </table>
+
+    <h2>매도 패턴별 손익 (무엇이 돈을 벌었나)</h2>
+    <table>
+      <tr><th>패턴</th><th style="text-align:right">건수</th><th style="text-align:right">승률</th><th style="text-align:right">총 손익</th></tr>
+      <tr><td>rsi_overbought</td><td style="text-align:right">12</td><td style="text-align:right">100%</td><td style="color:#1a7f37;text-align:right">+360,000원</td></tr>
+      <tr><td>split_profit</td><td style="text-align:right">8</td><td style="text-align:right">100%</td><td style="color:#1a7f37;text-align:right">+200,000원</td></tr>
+      <tr><td>ambiguous_take</td><td style="text-align:right">5</td><td style="text-align:right">80%</td><td style="color:#1a7f37;text-align:right">+90,000원</td></tr>
+      <tr><td>trailing_stop</td><td style="text-align:right">4</td><td style="text-align:right">50%</td><td style="color:#1a7f37;text-align:right">+20,000원</td></tr>
+      <tr><td>slow_bleed</td><td style="text-align:right">3</td><td style="text-align:right">0%</td><td style="color:#cf222e;text-align:right">-40,000원</td></tr>
+    </table>
+
+    <h2>매도 타이밍 사후분석 (팔고 난 뒤 얼마나 더 올랐나 / 빠졌나)</h2>
+    <table>
+      <tr><th>패턴</th><th style="text-align:right">건수</th><th style="text-align:right">당일놓침</th>
+      <th style="text-align:right">놓친상승(5일)</th><th style="text-align:right">막은하락</th>
+      <th style="text-align:right">홀드종가</th><th>판정</th></tr>
+      <tr><td>crash_instant</td><td style="text-align:right">5</td><td style="text-align:right">+5.4%</td><td style="color:#1a7f37;text-align:right">+15.1%</td><td style="color:#cf222e;text-align:right">+4.2%</td><td style="color:#1a7f37;text-align:right">+8.0%</td><td style="color:#656d76">조기매도(상승 놓침)</td></tr>
+      <tr><td>rsi_overbought</td><td style="text-align:right">12</td><td style="text-align:right">+2.6%</td><td style="color:#1a7f37;text-align:right">+9.4%</td><td style="color:#cf222e;text-align:right">+3.0%</td><td style="color:#1a7f37;text-align:right">+3.1%</td><td style="color:#656d76">조기매도(상승 놓침)</td></tr>
+      <tr><td>breakeven_protect</td><td style="text-align:right">8</td><td style="text-align:right">+2.0%</td><td style="color:#1a7f37;text-align:right">+4.8%</td><td style="color:#cf222e;text-align:right">+6.1%</td><td style="color:#cf222e;text-align:right">-1.9%</td><td style="color:#656d76">보호 성공(하락 회피)</td></tr>
+      <tr><td>slow_bleed</td><td style="text-align:right">3</td><td style="text-align:right">+1.2%</td><td style="color:#1a7f37;text-align:right">+1.0%</td><td style="color:#cf222e;text-align:right">+9.5%</td><td style="color:#cf222e;text-align:right">-6.8%</td><td style="color:#656d76">보호 성공(하락 회피)</td></tr>
+    </table>
+    <p style="color:#656d76;font-size:12px;margin:6px 2px">당일놓침=매도 후 같은 날 장중 최대 추가 상승 · 놓친상승/막은하락=매도 후 5거래일 forward · '조기매도'는 더 늦게, '보호 성공'은 유지가 데이터 권고</p>
+
+    <h2>종목선택 평가 (지수 대비 초과수익 alpha, 10거래일)</h2>
+    <div class="grid">
+<div class="card"><div class="k">평균 종목수익</div><div class="v" style="color:#1a7f37">+3.10%</div></div>
+<div class="card"><div class="k">지수 대비 alpha</div><div class="v" style="color:#1a7f37">+1.80%p</div></div>
+<div class="card"><div class="k">지수 초과 비율</div><div class="v" style="color:#656d76">55.0%</div></div>
+<div class="card"><div class="k">평가 매수건수</div><div class="v" style="color:#656d76">40건</div></div>
+    </div>
+    <table style="margin-top:12px">
+      <tr><th>시장</th><th style="text-align:right">건수</th><th style="text-align:right">종목수익</th><th style="text-align:right">alpha</th><th style="text-align:right">초과율</th></tr>
+      <tr><td>KR</td><td style="text-align:right">22</td><td style="color:#1a7f37;text-align:right">+2.1%</td><td style="color:#1a7f37;text-align:right">+0.6%p</td><td style="text-align:right">50.0%</td></tr>
+      <tr><td>US</td><td style="text-align:right">18</td><td style="color:#1a7f37;text-align:right">+4.3%</td><td style="color:#1a7f37;text-align:right">+3.2%p</td><td style="text-align:right">61.0%</td></tr>
+    </table><p style="color:#656d76;font-size:12px;margin:6px 2px">놓친 최고종목(12일): 봇 최선 픽 평균 +4.2% vs 놓친 최고 평균 +11.5% → gap +7.3%p</p>
+
+    <div class="foot">
+      zusik 자동매매 · 투자결과 종합 (실효 기준: 입금 + 누적실현 + 보유평가, 결제타이밍 보정)
+      <div class="gen">생성: (예시 — 샘플 데이터)</div>
+    </div>
+  </div>
+</body>
+</html>

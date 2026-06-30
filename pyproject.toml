@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zusik"
+version = "1.0.0"
+description = "KIS(한국투자증권) 기반 AI 멀티-애널리스트 자동매매 봇 — KR/US/crypto, 수익 기반 자가학습"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "zusik contributors" }]
+dependencies = [
+    "requests>=2.31.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "anthropic>=0.45.0",
+    "pyupbit>=0.2.33",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "schedule>=1.2.0",
+    "discord.py>=2.0",
+    "websocket-client>=0.59",
+]
+
+[project.scripts]
+zusik = "main:main"
+
+[tool.setuptools]
+# 패키지: zusik/ (서브패키지 core·clients·analysis·storage·strategies·utils)
+packages = [
+    "zusik", "zusik.core", "zusik.clients", "zusik.analysis",
+    "zusik.storage", "zusik.strategies", "zusik.utils",
+]
+py-modules = ["main"]

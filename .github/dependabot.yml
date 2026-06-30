@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Python 의존성 (requirements.txt) — 보안/버전 업데이트 PR 자동 생성.
+  # Dependabot 보안 경보(CVE)는 저장소 Settings → Code security 에서 'Dependabot security
+  # updates' 를 켜면 취약점 발견 시 자동 PR. 이 파일은 정기 버전 업데이트 담당.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+
+  # GitHub Actions 버전 — 액션 deprecation(예: Node20 종료)·보안 업데이트 자동 추적.
+  # 이번 같은 actions/checkout·setup-python 구버전 경고를 앞으로 자동으로 잡아준다.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "github-actions"

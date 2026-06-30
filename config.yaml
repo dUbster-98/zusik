@@ -1,0 +1,638 @@
+external_reserve: 0
+monthly_deposit:
+  # 월 정기 적립 시뮬(원). 본인 값은 config.local.yaml 에서 설정(개인값).
+  enabled: false
+  amount: 0
+trading_mode: auto
+broker:
+  # KIS 파생ETF 선택확인서 등록 여부. false면 인버스/레버리지/선물/커버드콜 ETF 제외.
+  # 본인 계정이 파생ETF 승인됐으면 config.local.yaml 에서 true 로(인버스 헷지 활성화).
+  derivative_etf_enabled: false
+
+# CLI provider on/off (분석 속도 가속)
+ai_providers:
+  disable_codex: false
+
+  # agy(Antigravity) — 구글 Gemini 계열 provider. `agy -p`(--print) 비대화형 모드로 봇이 호출.
+  # ~/.local/bin/agy + ~/.gemini 로그인 필요. claude/codex 와 부하를 나눠 claude 과부하를 던다.
+  disable_agy: false
+
+  # claude 일시정지 — 이 시각(KST 'YYYY-MM-DD HH:MM') 전까지 claude(Anthropic) 호출 0.
+  # 사용자 Claude(Max) 쿼터 보호용. 봇은 codex/agy/로컬 퀀트로만 매매. 시각 경과 시 자동 복귀
+  # (재시작 불요). 끄려면 빈 문자열("") 로. 매매 안전망(급락/트레일링/하드스톱)은 로컬이라 무관.
+  claude_pause_until: ""
+
+  # LLM 전체 불가 시 메신저 알림 — 장중 1회만, 실제 설치된 provider만 지목. 끄려면 false.
+  llm_health_alert: true
+
+  # ── 로컬 LLM (Ollama) — API 비용/쿼터 0 ──
+  # API 대형 LLM(claude/codex/agy) 대신 자체 머신의 로컬 모델로 분석을 돌리고 싶은
+  # 사용자용. 기본 OFF — CLI 구독 운영자는 false 유지(영향 없음). 켜는 법: docs/LOCAL_LLM.md
+  #   1) Ollama 설치 + `ollama pull qwen2.5:7b`
+  #   2) local_enabled: true
+  # 활성 시 저렴 티어(easy/medium/cheap_web/balanced)는 로컬을 우선 사용하고,
+  # 중요 판단(hard/premium)은 Claude 우선·로컬은 폴백. 로컬 무응답이면 자동 비활성.
+  local_enabled: false
+  local_endpoint: "http://localhost:11434"   # Ollama HTTP 엔드포인트
+  local_model: ""                             # 사용자가 환경에 맞게 직접 지정 (Ollama 에 받은 모델명). 비우면 비활성
+  local_search_backend: "duckduckgo"          # duckduckgo | searxng | none (검색 결과 주입 = "검색 가능")
+  local_searxng_url: "http://localhost:8888"  # searxng 백엔드일 때만 사용
+  local_search_results: 4                     # 주입할 검색 결과 개수
+  local_timeout: 120                          # CPU 추론은 느림 — 초 단위 타임아웃
+
+# 균형 복구 (codex/agy 재로그인으로 부하 분산 회복 → AI 분석 정상화)
+reports:
+  # 효과 추적 baseline (hold-through·모델선택·whitelist 재설계 배포일).
+  # 이 날짜 이후 신규 매도만으로 조기손절 비중↓·실현↑ 효과를 매 장마감 자동 리포트.
+  fix_baseline_date: "2026-06-03"
+  pre_market_enabled: true    # 장전 리포트 — 매매 반영O: _pre_market_buy_gate가 sentiment로
+                              # 신규 매수 차단/확신도 하한 적용 (whitelist 우회). 복구.
+  daily_enabled: false        # 장후 일일 리포트 — 매매 반영X (순수 Discord 보고용, 소비처 0).
+                              # 가장 무거운 Claude 호출이라 비활성 유지 (실투자 영향 없음).
+  claude_screener_enabled: true   # Claude 종목 선별 (sonnet) — 후보 풀에 반영. 복구.
+                                  # auto_screener (MC + Vortex, Claude 미사용)와 병행
+
+# 분석 동시화 — 복구: 3개 CLI(claude/codex/agy) 분산 회복으로 1→3.
+# 동시 3종목 분석을 라운드로빈으로 분산 (원 기본값 4보다 약간 보수적).
+analysis_max_workers: 3
+
+# 아레나(가상 전략 경쟁) — 장 마감 중엔 스킵. 복구: 60→30분.
+# 결과는 로그에 "현재 1등 전략"으로 표면화(어떤 전략 레짐이 실제로 이기는지 가시화).
+arena:
+  # 비활성: 1년 paper-trading 결과 에이전트 대다수 손실 → 의사결정 미사용.
+  # 30분 스캔(전 종목 OHLCV+현재가 API + 6전략)이 안 쓰이는 모니터링에 낭비라 OFF.
+  # 메커니즘은 유지 — 필요 시 true 로 재활성.
+  enabled: false
+  interval_minutes: 30
+
+# 종목 선택 다양화/상황 적응 — RS 랭킹에 레짐·로테이션 틸트 적용.
+selection:
+  regime_adaptive: true    # 하락장(bear score↑)엔 저변동(방어) 종목, 상승장엔 모멘텀 우선
+  regime_bear_gate: 0.40   # bear score 이 이상이면 방어(저변동) 틸트 적용
+  regime_vol_weight: 1.5   # 하락장 변동성 페널티 강도
+  rotation: true           # 최근 매도 종목 디프리오리타이즈 — 같은 테마 쏠림 방지(로테이션)
+  rotation_penalty: 0.03   # 로테이션 페널티 (RS %p 환산)
+  event_boost: 0.05        # 이벤트 로테이션: 장전 리포트에서 감지한 활성 수혜 섹터 종목 부스트(RS %p)
+
+# 개장 급변동 대처: 개장 직후 시초 갭/스파이크 추격을 피하려 신규 매수 보류.
+# 헷지·추가매수(피라미딩)·빠른진입(확인된 신호)은 제외. 보유 청산은 40초 빠른 익절이 관리.
+open_guard:
+  enabled: true
+  delay_minutes: 5         # 개장 후 이 시간(분)까진 단순 신규 매수 보류 (KR 09:00 / US 22:30 KST 기준)
+
+# 빠른 로컬 진입: 5분 run_once 사이 급등 돌파/과매도 반등을 추가 Claude 호출 없이 포착해 진입.
+# 유니버스는 장전 LLM 선별+RS 게이트를, 매 진입은 _pre_market_buy_gate를 거치므로 전략적 AI는 이미 반영 —
+# 여기선 돌파 순간의 실시간 Claude 호출만 생략. '단순 보류'가 아니라 오를 신호 확인 종목을 빠르게 잡음.
+# _handle_buy의 모든 안전 게이트(현금/churn/추세/RSI>78 추격 차단) 통과, 매수 후 40초 빠른 익절이 보호.
+fast_entry:
+  enabled: true
+  interval_seconds: 120    # 스캔 주기(초). 30 미만은 30으로 클램프
+  max_new_per_scan: 1      # 스캔당 신규 진입 최대 종목 수 (과진입 방지)
+  # 0.6→0.45: 돌파+거래량이 이미 확인된 상태면 모멘텀 바를 낮춰 더 많은 급등 포착.
+  # 실데이터 A/B(2년 walk-forward, 49종목 KR+US): 0.45가 +4.63%p(최근 1년 +3.71%p) 우위 +
+  # 다운사이드 불변(최악손실·-15%손절 횟수 동일) → 떨어지는 칼이 아닌 진짜 급등을 잡음. 변경 시 재검증.
+  momentum_min: 0.45       # 급등 진입 모멘텀 점수 하한 (0~1, 높을수록 보수적)
+  retry_throttle_sec: 600  # 같은 종목 재시도 최소 간격(초) — 신호 지속 종목 반복 매수 방지
+
+# 적응형 파라미터
+# 누적 손익률(pnl_pct) + drawdown(dd) 기반으로 분산/익절 강도 동적 조절.
+# 우선순위: crisis > defensive > harvest > winning > normal (위에서부터 매칭)
+adaptive:
+  enabled: true
+  states:
+    - name: crisis      # dd ≤ -15%: 위기. 분산 강화 + 빠른 익절
+      trigger: "dd<=-15"
+      correlation: 0.60
+      same_sector: 1
+      cap: 0.06
+      whitelist_cap: 0.10
+      rsi_exit_min: 70
+      rsi_exit_profit_min: 0.015
+    - name: defensive   # dd ≤ -5%: 방어. 분산 회복
+      trigger: "dd<=-5"
+      correlation: 0.75
+      same_sector: 2
+      cap: 0.08
+      whitelist_cap: 0.15
+      rsi_exit_min: 75
+      rsi_exit_profit_min: 0.02
+    - name: harvest     # pnl ≥ +20%: 큰 수익. 이익 보호로 분산 다시 강화
+      trigger: "pnl>=20"
+      correlation: 0.75
+      same_sector: 1
+      cap: 0.08
+      whitelist_cap: 0.15
+      rsi_exit_min: 85
+      rsi_exit_profit_min: 0.04
+    - name: winning     # pnl ≥ +10%: 수익. 살짝 보수화
+      trigger: "pnl>=10"
+      correlation: 0.85
+      same_sector: 2
+      cap: 0.10
+      whitelist_cap: 0.20
+      rsi_exit_min: 85
+      rsi_exit_profit_min: 0.05
+    - name: normal      # 평소. 공격적
+      trigger: "default"
+      correlation: 0.90
+      same_sector: 2
+      cap: 0.14  # 일반 종목
+      whitelist_cap: 0.25
+      # B: 익절 임계 강화 (큰 추세 살림). RSI 80/3% → 85/5%
+      rsi_exit_min: 85
+      rsi_exit_profit_min: 0.05
+screening:
+  enabled: true
+  # 종목 선택 방식 — monte_carlo(기본·MC 부트스트랩) | momentum(모멘텀) | trend(추세 정배열) | low_vol(저변동 방어).
+  # MC 외 방식은 시뮬 없이 빨라 상황별로 골라 쓸 수 있다(예: 하락장 low_vol, 강세장 momentum).
+  method: monte_carlo
+  # 강 분산 모드: 종목당 5~10% × 15+8 = 약 100% 활용.
+  # 파생 ETF 제외 후 실제 종목 수 보전 위해 kr_count 여유롭게.
+  kr_count: 15
+  us_count: 10
+  # auto_screener.filter_top에 전달 — 단일주 최소 N개 슬롯 보장 (ETF만 차지 방지)
+  min_single_stocks_kr: 6
+  min_single_stocks_us: 4
+  # whitelist: MC 점수와 무관하게 항상 후보에 포함 (사용자 핵심 종목)
+  # 분산 핵심 바스켓 (7섹터 8종목). 반도체 쏠림 해소 — 코어 진입이 각 섹터
+  # 대표주를 하한만큼 담아 분산. (blacklist NAVER/카카오 제외)
+  whitelist_kr:
+    - { code: "005930", name: "삼성전자" }              # 반도체
+    # core_shares: 종목별 코어 목표 주수(비싼 핵심주 직접 지정). 하이닉스 2주 = 사용자 요청.
+    - { code: "000660", name: "SK하이닉스", core_shares: 2 }  # 반도체
+    - { code: "005380", name: "현대차" }               # 자동차
+    - { code: "086790", name: "하나금융지주" }          # 금융
+    - { code: "207940", name: "삼성바이오로직스" }       # 바이오
+    - { code: "012450", name: "한화에어로스페이스" }     # 방산
+    - { code: "051910", name: "LG화학" }               # 2차전지/화학
+    - { code: "033780", name: "KT&G" }                # 디펜시브/소비재
+  # 사용자 blacklist (구매 금지)
+  blacklist_kr:
+    - "035420"  # NAVER
+    - "035720"  # 카카오
+  whitelist_us:
+    - { ticker: "NVDA", name: "NVIDIA", exchange: "NASD" }
+    - { ticker: "AAPL", name: "Apple", exchange: "NASD" }
+    - { ticker: "MSFT", name: "Microsoft", exchange: "NASD" }
+  screen_interval_hours: 2  # 복구 (절감 시 6h → 원복 2h)
+  # numpy 자동 스크리닝(감시종목 재랭킹) 주기. 일 1회→4h로 단축해 watch list가
+  # 시장 변동을 따라가게. (현금 무관 재랭킹 — 고정 종목이 시장 흐름 무시하던 문제 해결.)
+  auto_screen_interval_hours: 4
+  crisis_interval_minutes: 30
+  style: defensive
+  preferred_sectors:
+  - 메가캡 반도체
+  - 디펜시브 (통신/유틸리티/소비재)
+  - 헬스케어 대형주
+  avoid:
+  - 바이오 신약 임상 초기
+  - 스팩
+  - 적자 기업
+  - 시총 작은 변동성 종목
+  - 데드크로스/약세 추세 종목
+  min_market_cap_kr: 5조
+  min_market_cap_us: 50B
+# 종목 풀 (5/1 재교체) — 시드 10만원 매칭 가능한 저가 우량주 + 인덱스 ETF.
+# 메가캡 직매수는 1주도 못 사서 현금만 쌓이는 문제 해결.
+# 원칙: 시총 5조+ 또는 분산 ETF, 주가 ≤ 5만원(KR) 또는 ≤ $60(US).
+stocks:
+# 인덱스 ETF (분산 + 낮은 변동성, 시드 10만원 매칭 OK)
+- code: '102110'
+  name: TIGER 200
+- code: '069500'
+  name: KODEX 200
+- code: '360750'
+  name: TIGER 미국S&P500
+- code: '133690'
+  name: TIGER 미국나스닥100
+# 저가 우량주 (시총 5조+, 주가 ≤ 5만원)
+- code: '316140'
+  name: 우리금융지주
+- code: '055550'
+  name: 신한지주
+- code: '024110'
+  name: 기업은행
+- code: '015760'
+  name: 한국전력
+- code: '034730'
+  name: SK
+- code: '030200'
+  name: KT
+# 인버스 (하락장 헷지)
+- code: '409820'
+  name: KODEX 미국나스닥100인버스(H)
+- code: '251340'
+  name: KODEX 코스닥150선물인버스
+
+# 미국 매매 on/off — 미국 주식을 안 하는 사용자는 false 로 끈다(기본 true).
+# false 면 미국 매수/매도·장전후 알림·USD 잔고조회·환율조회가 전부 비활성(KR/crypto 만 운용).
+# 변경 권장: python scripts/configtool.py set us_enabled false  (config.local.yaml 에 기록)
+us_enabled: true
+
+us_stocks:
+# 저가 메가캡 + 디펜시브 (주가 ≤ $60)
+- ticker: F
+  name: Ford
+  exchange: NYSE
+- ticker: T
+  name: AT&T
+  exchange: NYSE
+- ticker: VZ
+  name: Verizon
+  exchange: NYSE
+- ticker: BAC
+  name: Bank of America
+  exchange: NYSE
+- ticker: PFE
+  name: Pfizer
+  exchange: NYSE
+- ticker: KO
+  name: Coca-Cola
+  exchange: NYSE
+- ticker: CSCO
+  name: Cisco
+  exchange: NASD
+# 제외: PEP($145), JPM($200) — 시드 10만원으로 1주 매수 불가
+- ticker: INTC
+  name: Intel
+  exchange: NASD
+# 저가 ETF (분산)
+- ticker: SOXX
+  name: iShares Semiconductor ETF
+  exchange: NASD
+# US 인버스 (하락장 헷지)
+- ticker: SQQQ
+  name: ProShares UltraPro Short QQQ
+  exchange: NASD
+- ticker: SH
+  name: ProShares Short S&P 500
+  exchange: AMEX
+crypto_tickers:
+- KRW-BTC
+- KRW-ETH
+crypto_invest_ratio: 0.15
+inverse:
+  # 상황 적응: 인버스는 주식 상황에 따라 발동. 직전 −473k 드레인의 원인은
+  # 단발 지수급락 진입이 V반등에 휩쏘된 것(−407k) → 그 트리거는 기본 OFF.
+  enabled: false
+  adaptive: true               # 상황 적응 게이트 사용 (아래 트리거 조합)
+  trigger_crisis: true         # market_condition ∈ {crisis,war} (지속적 거시 위기)에서 발동
+  trigger_index_crash: false   # 단발 지수 급락 진입 — 휩쏘 위험이라 기본 OFF (필요 시 true)
+  max_ratio: 0.1               # 총자산 대비 인버스 노출 상한 (상황 비례 tranche × 이 캡)
+  # EOD 수익 락인 — 인버스는 익일 개장 갭업에 장중 평가익이 증발하는 비대칭 위험이 크다.
+  # 정규장 마감 N분 전부터 왕복 수수료 공제 후 순익(+)이면 실현(헷지 유효 시 익일 재진입).
+  eod_profit_lock: true        # 마감 임박 수익 인버스 청산 활성
+  eod_lock_window_min: 20      # 정규장 마감 N분 전부터 발동 (KR 15:20 / US 마감 KST 05:00·06:00)
+  eod_lock_min_profit: 0.003   # 순익 +0.3%↑면 실현 (왕복 수수료 공제 후)
+  # 시장별 무차별 매수 차단 — 인버스는 기초지수가 내릴 때만 오른다. ETF '자기 등락률'로
+  # 이 시장이 지금 빠지는지 직접 확인 → KOSPI만 빠질 때 코스닥/나스닥 인버스(251340/409820)까지
+  # 한꺼번에 사는 손실을 막는다(지수/장시간 무관·스테일 면역). 0이면 비활성.
+  entry_min_rise_pct: 1.0      # 신규/증액은 그 인버스가 장중 +1.0%↑(기초지수 하락 확인) 일 때만
+  # 반전 락인 — 헷지 성공 후 인버스가 되돌림(=기초지수 반등) + 순익이면 EOD까지 안 기다리고 즉시 실현.
+  # '제때 못 팔아' 장중 평가익이 증발하던 문제 대응. 손실 락인 금지(순익일 때만). 0이면 비활성.
+  reversal_lock_pct: 1.5       # 보유 인버스가 장중 -1.5%↓(기초지수 반등) + 순익 → 즉시 락인
+  # 빠른 익절 — 인버스는 감쇠+지수 우상향이라 큰 하락을 기다리면 평가익이 되돌려져 손실로 끝나기 쉽다.
+  # 헷지가 통해 +1~2% 나면 바로 챙기는 게 인버스에서 실제로 수익 내는 현실적 방법(사용자 요청).
+  # 왕복 수수료 공제 후 순익 기준. 0이면 비활성(큰 추세까지 보유). 패턴 태그 inverse_take 로 측정.
+  # 이 값은 고정이 아니라 seed — inverse_take 사후데이터로 자가 보정된다(_learned_inverse_quick_profit).
+  quick_profit_pct: 1.5        # 빠른익절 임계 seed(%). 학습이 [min,max] 안에서 조정
+  learning_enabled: true       # inverse_take 성과로 임계 자가학습 (false면 위 seed 고정)
+  quick_profit_min: 0.005      # 학습 하한(0.5%) — 너무 자주 익절 방지
+  quick_profit_max: 0.035      # 학습 상한(3.5%) — 너무 오래 들고 가다 되돌림 방지
+# 가용성 감시 — scripts/watchdog.py(systemd timer 5분)가 코어 죽음/멈춤·LLM 다운을 감지해
+# 전이 시 1회 통보(복구 포함). 설치: bash deploy/setup_service.sh
+watchdog:
+  heartbeat_stale_min: 10      # status.json generated_at 가 N분 넘게 안 갱신되면 hang 판정
+# 입출금 처리(자동감지 비활성 — 사용자 manual 입력만 신뢰)
+# auto_detect=true로 두면 KIS API의 transient lag (한투 hantu_tot 결측, 매도 직후 스냅샷 지연 등)을
+# 출입금으로 오인해 manual_total_krw가 ±수만원씩 튕기며 수익률 보고가 망가짐.
+deposits:
+  auto_detect: false
+# 상승장 인덱스 추종 — bull regime 시 KOSPI/SPY 베타 노출 확보
+# 비활성화: 5/7 NEE rotate 강제청산이 -5,004원 단일 손실의 주범. 약세 종목을
+# 손실 확정 상태에서 인덱스 ETF로 갈아타는 비용이 인덱스 베타 이득보다 큼.
+index_follow:
+  enabled: false
+  bull_score_trigger: 0.50        # 지수 모멘텀 점수 ≥ 0.5 시 회전 활성
+  min_kr_allocation: 0.30         # KR 인덱스 ETF 최소 비중 30%
+  min_us_allocation: 0.30         # US 인덱스 ETF 최소 비중 30%
+  rotation_cooldown_hours: 12     # 회전 후 12시간 쿨다운 (과회전 방지)
+ai_provider: claude
+strategy:
+  name: auto_hybrid
+  model: claude-sonnet-4-20250514
+  use_web_search: true
+  prefer_cli: true
+  # 30→120. get_daily_long(250봉)을 받아도 _backtest_window가 backtest_days+워밍업
+  # (=60봉)만 남겨 모델선택이 ~40일만 평가하던 문제 수정. 120일=충분한 표본(전략별 거래 누적)
+  # + 레짐 변화 적응(전체 1년은 과거 강세장에 갇혀 laggy). 6개월 균형.
+  backtest_days: 120
+  target_volatility: 0.02
+  # 보수화: sonnet 한도(600→300) 하향과 함께 cadence도 보수 디폴트로 되돌림.
+  #   봇이 사용자 일반 Claude 사용을 침범하지 않도록 트리거/주기를 더 길게.
+  #   웹검색은 계속 full만 — quick 웹검색(호출당 5분 타임아웃)이 과거 폭증의 핵심 원인.
+  claude_vol_hold: 0.04            # 보유종목 Claude 트리거 (2.5%→4%)
+  claude_vol_noholding: 0.10       # 미보유 (8%→10%)
+  claude_periodic_hold: 7200       # 보유 주기 (1시간→2시간) — Claude 재분석 빈도 절감
+  claude_periodic_noholding: 21600 # 미보유 주기 (4시간→6시간)
+  claude_full_only_bleeding: true  # full(4인): 출혈 시만 (vol 7% 트리거 제거)
+  claude_websearch_full_only: true  # 복원: 웹검색(=Claude deep research, 호출당 5분)은
+                                    # full(드묾, vol≥5%)에만. quick(빈번) 분석은 웹검색 끔 → Max 토큰 절감.
+                                    #(quick 허용은 토큰 과소비로 되돌림.) 리포트 웹검색은 codex/agy 우선.
+
+# 익절 장-적응: 강세장은 익절 늦춰 추세 살림 / 약세장은 빠른 이익확정.
+# bull/bear regime score(로컬 지수ETF 모멘텀, Claude無)로 RSI 익절 임계를 가감.
+profit_taking:
+  regime_adaptive: true
+  rsi_tilt: 8.0      # 강세장 rsi_exit_min +8 / 약세장 -8 (범위 70~92)
+  profit_tilt: 0.03  # 강세장 익절 수익임계 +3% / 약세장 -3% (범위 1~15%)
+
+# 안정적 수익 — 변동성 타겟 사이징 (risk-parity-lite).
+# 종목 실현 일일변동성을 target_daily_vol 기준으로 정규화 → 변동성 큰 종목은 작게,
+# 안정적 종목은 크게 담아 포트폴리오 전체 변동성을 일정하게 유지. 계좌 곡선 안정화.
+vol_sizing:
+  enabled: true
+  target_daily_vol: 0.025   # 이 변동성 종목 = 배수 1.0. 5% 변동성 → 0.5x, 1.8% → 1.4x(상한)
+  scalar_min: 0.5           # 고변동 종목 사이즈 하한 배수
+  scalar_max: 1.4           # 저변동 종목 사이즈 상한 배수
+
+# 안정적 수익 — 변동성 레짐 현금버퍼.
+# 지수(KODEX200/QQQ/SPY) 일별 변동성이 높은 구간에서만 총노출을 자동 축소해 dry powder 확보.
+# 평시 변동성이면 1.0(전액 공격, external_reserve=0와 충돌 X), 고변동 구간만 일시 축소.
+vol_regime_buffer:
+  enabled: true
+  normal_daily_vol: 0.012   # 지수 변동성 이 이하 → 풀 노출 (1.0x)
+  high_daily_vol: 0.030     # 이 이상 → 최저 노출 (throttle_floor)
+  throttle_floor: 0.6       # 고변동 시 노출 60%까지 축소 (≈40% 현금버퍼)
+candle_period: D
+run_interval_minutes: 5
+invest_ratio: 0.08
+# B 조정: 매수 속도 가속 위해 base 0.06 → 0.08.
+# 1종목 첫 진입 ~170만, max cap 12% = 264만. SK하이닉스 1주(228만)까지 수용.
+# 16+11=27종목이면 활용률 ~120% 이론치 (실제 multiplier 적용 시 평균 85~100%).
+invest_ratio_max: 0.12
+min_amount: 5000
+min_amount_usd: 5
+# 현금 예약: 총자산의 5%를 현금으로 유지 — 일반주 신규매수는 이 선 아래면
+# 차단되지만 인버스 헷지 매수는 우회한다. 풀투자 상태라 폭락 시 헷지 살 현금이 없던 문제 해결
+# (예약 현금은 곧 테일헷지 실탄). 롱 강제매도로 자금 조달은 안 함('바닥 손절 0% 승률' 원칙).
+_cash_reserve: 0.05
+long_term_ratio: 0.30  # 0.0 → 0.30 (LONG_TERM_BUY 시그널이 모두 차단되던 문제)
+
+# buy_paused_until: 시간 가드 (이전: 5/27 15:30 정지 — 만료, 비활성)
+buy_paused_until: ""
+risk:
+  daily_target_profit_rate: 0.02
+  daily_target_profit_amount: 0
+  # 일일손실한도 1.5%→3% (사용자 승인). 인버스 헷지 청산(-377k, 전일 평가손
+  # 일괄 실현)이 1.5%(-297k)를 치고 +4.4% 반등장에서 출구관리까지 전면 정지된 실측이 배경.
+  # 일회성 헷지 정산과 전략 폭주를 같은 한도로 묶지 않기 위한 운영 조정. 3%(-594k)는 유지.
+  daily_loss_limit_pct: 0.03
+  strategy_switch_loss: -0.1
+  crisis_drop_threshold: -0.05
+  stop_loss_per_stock: -0.15
+  daily_loss_limit: -15000
+  # 조기손절 억제 (KR/US 공통). 비핵심 보유가 이 손익률보다 얕은 pullback이면
+  # crash_instant/quick_loss/slow_bleed/틱급락/당일급락 매도를 보류하고 회복을 기다린다.
+  # 핵심(whitelist)은 -15%까지 홀드(별도). 깊은붕괴(-15%↓·crash_from_high)·펀더멘털 위험·
+  # 트레일링·하드스톱(-15%)·RSI 과매수 익절은 그대로. 근거(KIS 반사실): 급락/손절 컷 0%승률
+  # (0/28, -828k), 같은 종목 보유 시 +424k(5봉)~+2.64M(구간 최고가).
+  # 더 오래 들려면 -0.12, 보수적이면 -0.06.
+  pullback_hold_floor: -0.09
+  # 손실측 자가학습: sell_timing 사후데이터(컷 대신 홀드했을 때 수익 net_if_held)로 위 floor 를
+  # 런타임 자동 보정. 조기컷이 많으면 floor 심화(홀드 연장), 정당컷이면 완화. 하드스톱(-15%)·
+  # deep_collapse 는 floor 밖이라 영향 없음(자본보호 불변). cap/shallow 로 [-13%, -7%] 클램프.
+  loss_learning_enabled: true
+  loss_learning_floor_cap: -0.13      # 가장 깊게 허용(하드스톱 -15% 보다 얕게 — 백스톱 잠식 금지)
+  loss_learning_floor_shallow: -0.07  # 가장 얕게 허용
+  # 회복 모드: drawdown 기반 defensive 강제 활성 + 매수 conf 70% 차단 비활성화.
+  # 사용자 요청 — drawdown -22% 상태에서 적극 회복 시도.
+  # 시장 crisis/war에 의한 defensive는 그대로 작동, dd_multiplier 사이즈 축소도 유지
+  defensive_mode_enabled: false
+  # 손익/자산 무결성 점검 (매 사이클, 로컬·API 0) — 버그·상태변조·정산 드리프트 조기 포착.
+  # 위반 시 메신저 경고(dedup). halt_buys_on_integrity_violation=true면 위반 시 신규매수만
+  # 보수화(매도/안전망은 항상 그대로). integrity_tolerance=자산 정합 허용오차(기본 5%).
+  integrity_tolerance: 0.05
+  halt_buys_on_integrity_violation: false
+  # 빠른 시장 급락 가드 (1-2 tick): 지수 단독 급락 또는 메가캡(NVDA/AAPL/MSFT/TSLA/AMZN)발
+  # 시장 급락 감지 시 신규 진입 전면 중단 + 방어 + 인버스 헷지 발동. 보유는 안 자름(hold-floor).
+  # defensive_mode_enabled 와 무관하게 항상 동작(아래 enabled 로 토글). 열린 시장 프록시만 본다.
+  fast_fall_guard:
+    enabled: true
+    index_sharp_pct: -2.5        # 지수 프록시 장중 이 % 이하 → 지수 단독 급락 (진입중단+헷지)
+    megacap_drop_pct: -3.5       # 메가캡 장중 이 % 이하 + 지수 동반 하락 → '메가캡발 시장 급락'
+    index_confirm_pct: -1.0      # 메가캡발 판정 시 지수 동반 하락 확인 임계
+reward:
+  decay_rate: 0.95
+  streak_bonus: 0.1
+  max_boost: 3.0
+  min_weight: 0.3
+  learning_trades: 5
+  context_learning_trades: 3
+  context_return_scale: 8.0
+  context_win_bonus_scale: 1.5
+cooldown:
+  daily_target_min_confidence: 0.8
+  daily_target_invest_ratio: 0.5
+consensus:
+  unanimous_multiplier: 1.2
+  majority_multiplier: 1.12
+  split_multiplier: 0.6
+  mixed_multiplier: 0.85
+position:
+  # churning 방지 (74건/7시간 미친 매매 → -3.4M 손실):
+  # 1차 100% 매수 후 끝. 추가 매수는 피라미딩 +7% 도달 시만.
+  buy_tranches:
+  - 1.0
+  buy_dip_pcts: []
+  # 인버스 헷지 전용 분할. _handle_buy의 hedge_base_ratio 경로에서만 사용.
+  # bear_score 구간별 0.50/0.65/0.80 진입과 매칭 — 일반주 buy_tranches=[1.0]에 의해
+  # 헷지가 1회 후 차단되던 폭락일 버그 근본 해결. dip-check는 skip
+  # (인버스는 가격이 RISES with bear, 가격 하락 요건 모순).
+  inverse_buy_tranches:
+  - 0.35
+  - 0.30
+  - 0.35
+  # 물타기(averaging down): 핵심주가 손실 구간이면 코어 목표를 cap 방향으로 키워
+  # 더 담아 평단을 낮춘다. -5%부터 시작, -12%에서 cap(25%)까지 풀 물타기. -15%↓는 깊은 손절.
+  # 비핵심주엔 미적용(아무 종목이나 물타기 X). 하락국면(bear≥0.5)·방어모드엔 미적용.
+  # whitelist 재설계 (불안정 해소 + 수익 최대화):
+  #   실데이터상 whitelist 강제매수가 전부 손실 — 하이닉스 -138,797·한화에어로 -60,073·
+  #   LG화학 -24,795·삼성 -22,415·현대차 -22,414 (합 -268k), 3종목은 비싸서 매수조차 못함.
+  #   conviction_floor·averaging_down·core_entry = '핸드픽 종목에 신호 무관 강제 베팅 + 낙폭에
+  #   물타기'라 손실을 키우는 불안정 요인. → 전부 OFF. whitelist는 이제 '급락에 안 던지는
+  #   hold-through 리스트'로만 쓰고(crash_exempt 유지), 매수는 데이터기반 선별/모델선택에 맡긴다.
+  averaging_down_enabled: false      # 낙폭 물타기 OFF (falling-knife 방지)
+  averaging_down_trigger: -0.05      # (미사용)
+  averaging_down_max_drawdown: -0.12 # -12%에서 목표가 cap까지 (그 아래 -15%는 손절선)
+  # 피라미딩 엄격화: +1% → +7%
+  pyramid_trigger_pcts:
+  - 0.07
+  pyramid_add_ratios:
+  - 0.3
+  # 핵심(whitelist) 종목 확신 하한 — 삼성/하이닉스 등이 곱셈식 디레이팅에
+  # 짓눌려 "1~2주"만 담기던 문제 보완. 강세장(bull≥min)+비방어에서만 whitelist_cap의
+  # N%까지 포지션을 보장. 약세장/방어 모드는 미적용(기존 보수화 유지). 하드 상한은 cap 그대로.
+  # 핵심(whitelist) 코어 진입 — hold 신호여도 미보유 핵심주를 하한만큼 매수.
+  # 삼성/하이닉스가 늘 '관망'으로 떠서 매수 자체가 안 되던 문제 해결. 과열(당일 +N%↑)·
+  # 하락국면·방어모드에서는 보류.
+  # 핵심주는 이벤트성 급락(공장사고 등)에 안 던짐 — crash_instant/quick_loss/
+  # slow_bleed 면제. 깊은 붕괴(당일 -15%↓·고점대비 -20%)·펀더멘털 위험(분식/상폐 LLM확인)은 매도 유지.
+  # 잔여 달러 소진(bot_us.py)이 '양의 모멘텀'을 요구하는 바. momentum_score(-1~+1) 기준.
+  # 떨어지진 않지만 오르지도 않는(평평/식은) 종목에 자투리 현금을 넣어 죽은 자본이 되던
+  # 문제 방지(실증: MSFT 1주 매수 후 peak +0.24%만 찍고 -12.8% 출혈). 미달이면 매수하지
+  # 않고 현금을 그대로 둔다(현금 > 죽은 자본). 0.0=평평도 허용(구동작), 음수=약세도 허용.
+  leftover_momentum_min: 0.10
+  whitelist_crash_exempt: true       # 유지 — hold-through(급락에 안 던짐). 검증된 +EV 동작.
+  whitelist_core_entry: false        # 강제 코어진입/탑업 OFF (churn·강제매수 제거)
+  # 핵심주는 장기 코어라 장중 과열보다 '확보'가 우선 → 가드 0.08→0.15 완화.
+  # (삼성이 +8.8%에서 탑업이 막혀 1주에 머물던 문제. +15% 초과 극단 급등만 보류.)
+  whitelist_core_max_intraday: 0.15
+  # 0.7→0.3(분산): 8종목 바스켓이 예산에 맞게 들어가도록 코어 목표를 7.5%/종목로.
+  #   삼성(이미 8주 보유 ~17%)·하이닉스(core_shares 2)는 보유분 유지(탑업은 BUY만 하므로 안 줄임),
+  #   신규 6종목은 ~7.5%씩 담아 6섹터 분산. 합계 대략: 반도체 ~45% + 6섹터 ~45% + 현금버퍼.
+  whitelist_conviction_floor: 0.0    # 강제 floor 매수 OFF. 매수는 데이터기반 신호/선별이 결정
+  whitelist_floor_bull_min: 0.0     # 0.5→0.0. bull이 0.49로 경계에 걸려 floor가
+                                    #   안 먹던 문제(삼성 미매수). 하락장 차단은 _handle_buy의
+                                    #   bear<0.5 invest 하한이 담당.
+  # 종목당 일일 매수 한도 (NEW)
+  daily_buy_count_per_stock: 2     # 종목당 일 최대 2회 매수
+  buy_cooldown_minutes: 240        # 매수 후 4시간 동안 같은 종목 추가 매수 X
+  sell_tranches:
+  - 0.5
+  - 0.3
+  - 0.2
+  sell_target_pcts:
+  - 0.05
+  - 0.1
+  # 손절 추가 완화: 7일 손실 -300k 100%가 crash_instant 자동 손절
+  trailing_stop_pct: 0.15        # 10%→15% trailing (큰 추세 살림)
+  trailing_activate_pct: 0.07    # +5%→+7% 수익 시 활성
+  # 본전 보호 = 피크 비례 보존: 고정 +1.5% 바닥이 +5~9% 고점을 본전까지
+  # 흘려보내 평균 3.9%p 반납(삼성전기 +8.9%→+0.8% 등). floor=max(min,peak−cap).
+  breakeven_arm_pct: 0.03        # +3% 피크부터 보호 무장 (KR도 +3~7% 피크 보호)
+  breakeven_giveback_cap: 0.025  # 고점 대비 반납 허용폭 2.5%p (peak+8%→+5.5%에서 잠금)
+  breakeven_min_floor: 0.015     # 작은 피크 바닥(상승 초입 과민매도 방지, 기존값 유지)
+  strong_profit_take: 0.035      # 순익 +3.5%↑ 'sell' 신호는 모멘텀 무시하고 즉시 익절
+  # 수익 사다리: 기본 비활성([]). 49종목×3.6년 walk-forward 검증에서 피크비례(+75.1%)가
+  # 사다리(+68.3%)보다 우수 → calibrate_from_history.py가 learned_params.json에 []로 기록.
+  # 향후 데이터가 사다리를 지지하면 캘리브레이션이 자동으로 켠다(learned 오버레이).
+  profit_ladder: []
+  # 완화: 0.7 → 0.9. 삼성전자+SK하이닉스 같이 보유 가능. 분산 보호는 약해짐
+  max_correlation: 0.9
+  max_same_sector: 2
+  earnings_blackout_days: 2
+  surge_quick_profit: 0.1
+  surge_limit_sell: 0.25
+  surge_dynamic_vol_mult: 1.5
+  surge_dynamic_atr_mult: 1.2
+  surge_dynamic_quick_cap: 0.05
+  surge_dynamic_limit_cap: 0.1
+  surge_vol_fade_ratio: 0.5
+  # 급등 라이딩 (폭등 수익 극대화): 모멘텀 강하면 1차 익절을 적게(25%)
+  # 덜고 나머지는 트레일링으로 추세 보유. 모멘텀 둔화 시 기존 절반(50%) 익절.
+  surge_ride_enabled: true
+  surge_ride_trim_ratio: 0.25
+  surge_ride_rsi_max: 82
+  crash_instant_sell: -0.04
+  # 매수 직후 30분 보호 중엔 crash_instant를 이 임계로 강화 (fresh-buy 노이즈
+  # 급락 반등 보호 — 반사실 검증: -4~-7% 컷 대부분 반등). grace 후엔 위 -4% 그대로.
+  crash_grace_catastrophic: -0.10
+  # 완화: 7일 4건 손절(-338k) 전부 이 가드. -12% → -20%로 완화
+  crash_from_high_sell: -0.20
+  crash_gap_down: -0.08         # -5%→-8%
+  crash_vol_spike_ratio: 5.0
+  # crash_instant 변동성 비례 보정 — 변동성 큰 종목의 정상 출렁임에 패닉컷 방지(컷 완화 방향).
+  # ATR%가 baseline 넘는 만큼 임계를 깊게(예: ATR 5% → scale 1.6 → -4%가 -6.4%로). cap 까지만.
+  # 깊은 붕괴(crash_from_high/grace_catastrophic/-15% 하드스톱)는 무관 — 자본보호 불변.
+  crash_atr_scaling_enabled: true
+  crash_atr_baseline: 0.02
+  crash_atr_mult: 20.0
+  crash_atr_scale_cap: 2.0
+  pyramid_trigger_pcts:
+  - 0.03
+  - 0.07
+  pyramid_add_ratios:
+  - 0.4
+  - 0.3
+momentum_breakout:
+  lookback: 20
+  volume_mult: 2.0
+  momentum_min: 0.2
+  stop_atr_mult: 2.0
+# ══════════════════════════════════════════════════════════════════
+# AI 사용량 프로파일 — "첫 설정 시 사용 요금(plan)에 따라 다르게"
+# ──────────────────────────────────────────────────────────────────
+# AI agent 사용량은 아래 3축으로 조절한다. 본인 구독/요금제에 맞춰 프리셋을 고른다:
+#
+#   ┌── provider 분산: 항상 claude+codex+agy 3-CLI (ai_providers.disable_codex=false).
+#   │     한 CLI 한도 도달 시 자동 폴백 → Claude 단일 쿼터 부하를 구조적으로 분산.
+#   ├── 웹검색: strategy.claude_websearch_full_only (false=quick까지 / true=full만 / use_web_search=false=끔)
+#   └── 일일 한도: api_cost.daily_limits (provider별 호출 상한 — 아래 프리셋)
+#
+#   프리셋(claude_sonnet / claude_haiku / codex / agy / total):
+#     saver   (저요금·API PAYG/Pro):  60 / 300 / 1000 / 1200 / 3000   + 웹검색 full만 권장
+#     balanced(Max 5x):              150 / 600 / 1500 / 2000 / 6000   ← cost_optimizer.py 기본값
+#     quality (Max 20x):             250 / 900 / 1800 / 2500 / 7500   ← 현재 활성 (quick 웹검색과 함께)
+#
+#   claude_opus 는 최고가 모델이라 0 유지(premium tier도 sonnet 폴백, 품질 손실 미미).
+#   미지정 키는 cost_optimizer.DAILY_LIMITS 기본값을 유지하므로 바꿀 줄만 적어도 된다.
+# ══════════════════════════════════════════════════════════════════
+api_cost:
+  # Claude 비용 최적화: 어제 1500회 → 500회 목표
+  daily_budget_calls: 500
+  cache_ttl_calm: 90            # 30 → 90분 (변동 작으면 길게 캐시)
+  cache_ttl_normal: 45          # 15 → 45분
+  cache_ttl_volatile: 15        # 5 → 15분
+  price_change_threshold: 0.010 # 0.3% → 1% (작은 변동 무시)
+  full_analysis_threshold: 0.05
+  # 일일 호출 한도 — 위 프로파일에서 골라 덮어쓴다 (현재: quality / Max 20x).
+  # 요금제 바꾸면 이 블록 숫자만 saver/balanced 값으로 교체하면 즉시 반영.
+  daily_limits:
+    claude_opus: 0
+    claude_sonnet: 120            # 사용량 절감(250→120) — Claude 호출 하드 캡
+    claude_haiku: 400             # 저가 보조도 하향(900→400) → 한도 도달 시 codex/로컬 폴백
+    codex: 1800
+    agy: 250                      # Antigravity — 에이전트형(호출당 비쌈) 보수 캡
+    total: 3000                   # 전 provider 합산 일일 백스톱(7500→3000)
+# AI 신호 매매 반영 — '유저에게만 보여주던' 크로스시그널(美→韓 익일)·데일리 Claude 편향을
+# 실제 매수 게이트/사이징에 태운다 (_ai_signal_for 소비). 강세=확신도 하한 완화+증액,
+# 약세=하한 상향+축소, 매도 판단=신규 매수 차단. 진입 게이트까지만 영향(직접 매수 트리거는 안 함).
+ai_signals:
+  enabled: true
+  freshness_hours: 30          # 이 시간 지난 신호는 무시 (장 마감 → 익일 세션 커버)
+
+# 실시간 WebSocket 피드 (KIS) — 폴링(1~2분) 대신 체결 틱으로 즉시 반응. KR/US 공통.
+# enabled: extreme tier 보유종목 틱 익절/급락매도(이미 동작). off면 분봉 폴백만.
+# entry_enabled: 감시종목 급등 틱 → 즉시 빠른진입 스캔(이벤트 드리븐 진입). 장중 1회 검증 후 켜기 권장.
+#   진입 트리거는 "빠른진입 스캔을 지금 돌려라"는 신호만 — 실제 매수는 _fast_entry_scan 의
+#   모든 안전 게이트(OrderSafetyValidator·churn·무결성)를 그대로 거친다(WS 가 게이트 우회 안 함).
+realtime:
+  enabled: true
+  entry_enabled: false
+  entry_threshold_pct: 1.5     # 기준가 대비 +N% 급등 틱이면 빠른진입 스캔 트리거
+
+# 모호 케이스 LLM 라우팅 — pop-then-fade 익절 타이브레이크
+# 진입 게이트 필터로는 못 잡는(국면/RS/MA60 A/B 전부 무효) 모호한 매도 케이스를 LLM에 위임.
+# 로컬 게이트가 hold_score 모멘텀 때문에 '매도 연기'했지만 고점에서 의미있게 되돌린(fade)
+# 구간이면, 규칙 대신 LLM에 "지금 익절 vs 더 보유"를 물어 본전까지 흘러내리는 것을 끊는다.
+# 한 방향(연기→익절)만 뒤집고, 노이즈/순손실/과매도 보호 연기는 그대로 안전망에 맡긴다.
+# LLM 백엔드(CLI 또는 로컬)가 있어야 동작 — 없으면 무영향. 비활성: enabled false.
+ai_routing:
+  ambiguous_sell_enabled: true
+  hold_score_lo: 0.60          # 연기 발생선(0.60)~hi 사이만 모호로 escalate
+  hold_score_hi: 0.72          # 이보다 강한 모멘텀은 추세지속 → 보유 신뢰(escalate 안 함)
+  net_floor: 0.003             # 순익률 하한 (이하면 본전 미달 — 안전망에 맡김)
+  net_cap: 0.035               # strong_profit_take 미만 구간만 (이상은 이미 즉시 익절)
+  min_giveback: 0.015          # 고점 대비 되돌림 ≥1.5%p (pop-then-fade 시그니처)
+  take_min_conf: 0.60          # LLM 'take' 확신도 이 이상일 때만 연기 해제
+  cooldown_min: 0              # 0=매 tick 평가 허용. >0 이면 종목별 재질의 쿨다운(분, 호출 억제)
+training:
+  monthly_target_rate: 0.05
+  weekly_check: true
+  merit_boost: 0.1
+  demerit_penalty: 0.1
+# 로그 상세도. INFO=평시(서드파티 로거는 WARNING 으로 조용). DEBUG=verbose(전부 자세히).
+# 로그 위치: journalctl -u zusik -f (실시간) / logs/bot.log (회전 보관) /
+#           logs/errors.log (오류만) / logs/decisions.log (매수·매도 사유).
+log_level: INFO

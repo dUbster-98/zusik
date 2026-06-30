@@ -1,0 +1,14 @@
+# 템플릿 — bash deploy/setup_service.sh 가 placeholder 치환 후 설치.
+# zusik-watchdog.timer 가 5분마다 호출하는 oneshot. 코어/heartbeat/LLM/에러 감시 + 전이 통보.
+[Unit]
+Description=Zusik watchdog (liveness + LLM health check)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+Environment="PATH=__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=__PY__ __DIR__/scripts/watchdog.py
+StandardOutput=journal
+StandardError=journal

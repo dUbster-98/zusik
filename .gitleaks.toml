@@ -1,0 +1,15 @@
+# gitleaks 설정 (v8) — 기본 룰 + 오탐 제외.
+# security_manifest.json / requirements.lock 은 sha256 해시 핀 모음이라
+# discord-api-token 등 high-entropy 룰에 '시크릿'으로 오탐된다(실제 시크릿 아님 —
+# 공급망 무결성/해시 핀). 이 두 파일만 경로 allowlist 한다. 다른 파일은 전부 스캔.
+title = "zusik gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "해시 매니페스트/락 — sha256 핀(시크릿 아님)"
+paths = [
+  '''security_manifest\.json''',
+  '''requirements\.lock''',
+]

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>월간 리포트 2024-01</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f6f8fa; color: #1f2328;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", Roboto, sans-serif; line-height: 1.5; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 12px; margin-bottom: 24px; }
+  .head h1 { font-size: 20px; margin: 0; font-weight: 700; }
+  .head .sub { color: #656d76; font-size: 13px; }
+  .hero { text-align: center; padding: 28px 0 32px; }
+  .hero .label { color: #656d76; font-size: 13px; letter-spacing: .04em; }
+  .hero .ret { font-size: 56px; font-weight: 800; color: #1a7f37;
+    line-height: 1.1; margin-top: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 10px;
+    padding: 16px 18px; }
+  .card .k { color: #656d76; font-size: 12px; margin-bottom: 6px; }
+  .card .v { font-size: 19px; font-weight: 700; }
+  h2 { font-size: 15px; margin: 26px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff;
+    border: 1px solid #d0d7de; border-radius: 10px; overflow: hidden; font-size: 13px; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid #d0d7de; }
+  th { background: #f0f3f6; color: #656d76; font-weight: 600; text-align: left; }
+  tr:last-child td { border-bottom: none; }
+  .foot { margin-top: 28px; color: #656d76; font-size: 12px; text-align: center; }
+  .gen { margin-top: 4px; }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; }
+    .hero .ret { font-size: 44px; } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>월간 성과 리포트</h1>
+      <div class="sub">2024-01</div>
+    </div>
+    <div class="hero">
+      <div class="label">이번 달 수익률</div>
+      <div class="ret">+5.20%</div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="k">시작 자산</div><div class="v" style="color:#1f2328">10,000,000원</div></div>
+      <div class="card"><div class="k">종료 자산</div><div class="v" style="color:#1f2328">10,520,000원</div></div>
+      <div class="card"><div class="k">입금</div><div class="v" style="color:#1f2328">0원</div></div>
+      <div class="card"><div class="k">실현손익</div><div class="v" style="color:#1a7f37">+372,000원</div></div>
+      <div class="card"><div class="k">순증 (자산 − 투입)</div><div class="v" style="color:#1a7f37">+520,000원</div></div>
+      <div class="card"><div class="k">최대 낙폭 (MaxDD)</div><div class="v" style="color:#cf222e">-3.40%</div></div>
+      <div class="card"><div class="k">기록 일수</div><div class="v" style="color:#656d76">21일</div></div>
+    </div>
+
+    <h2>종목별 손익</h2>
+    <table>
+      <tr><th>종목</th><th style="text-align:right">매도건수</th><th style="text-align:right">승률</th><th style="text-align:right">총 손익</th></tr>
+      <tr><td>예시 종목 A <span style="color:#656d76">(000001)</span></td><td style="text-align:right">5</td><td style="text-align:right">100%</td><td style="color:#1a7f37;text-align:right">+210,000원</td></tr>
+      <tr><td>예시 종목 B <span style="color:#656d76">(000002)</span></td><td style="text-align:right">3</td><td style="text-align:right">67%</td><td style="color:#1a7f37;text-align:right">+120,000원</td></tr>
+      <tr><td>Example Co <span style="color:#656d76">(DEMO)</span></td><td style="text-align:right">4</td><td style="text-align:right">75%</td><td style="color:#1a7f37;text-align:right">+80,000원</td></tr>
+      <tr><td>예시 종목 C <span style="color:#656d76">(000003)</span></td><td style="text-align:right">2</td><td style="text-align:right">0%</td><td style="color:#cf222e;text-align:right">-38,000원</td></tr>
+    </table>
+    <div class="foot">
+      zusik 자동매매 · 월간 요약 · 실효 기준 (총자산 − 투입, 결제타이밍 보정)
+      <div class="gen">생성: (예시 — 샘플 데이터)</div>
+    </div>
+  </div>
+</body>
+</html>

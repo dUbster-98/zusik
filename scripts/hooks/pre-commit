@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# 무결성 기준선 자동 갱신 (pre-commit) —
+# .py / config.yaml 변경을 커밋하면 security_manifest.json 을 재생성해 같은 커밋에 포함한다.
+# 그래야 봇 재시작 시 main.py 의 무결성 트립와이어(verify_files)가 "변조 의심" 경고를 안 띄운다.
+#
+# 활성화: git config core.hooksPath scripts/hooks   (setup.sh 가 자동 설정)
+# manifest-only 라 네트워크 불필요(requirements.lock 은 배포 시 `security_lock.py generate` 로 별도 갱신).
+# 실패해도 커밋을 막지 않는다(best-effort) — 단, 경고를 남겨 수동 갱신을 유도.
+set +e
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$REPO" || exit 0
+
+# 추적 대상(.py 또는 config.yaml)이 이번 커밋(스테이지)에 포함될 때만 갱신
+if ! git diff --cached --name-only --diff-filter=ACMR \
+     | grep -qE '\.py$|(^|/)config\.yaml$'; then
+  exit 0
+fi
+
+PY="$(command -v python3 || command -v python)"
+[ -n "$PY" ] || { echo "pre-commit: python 없음 — 무결성 매니페스트 갱신 생략" >&2; exit 0; }
+
+if "$PY" security_lock.py manifest >/dev/null 2>&1; then
+  git add security_manifest.json 2>/dev/null
+else
+  echo "pre-commit: 무결성 매니페스트 갱신 실패 — 수동: python3 security_lock.py generate" >&2
+fi
+exit 0

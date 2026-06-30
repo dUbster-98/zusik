@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }} · py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 다양한 환경 검증 — 3 OS × 여러 Python. include 로 OS별 가능한 버전만 명시
+        # (macOS-latest = arm64 러너라 3.8~3.10 미제공 → ubuntu 한정).
+        include:
+          # ── Linux: 운영 서버(3.8.10) 포함 전 버전 ──
+          - { os: ubuntu-latest,  python-version: "3.8" }
+          - { os: ubuntu-latest,  python-version: "3.9" }
+          - { os: ubuntu-latest,  python-version: "3.10" }
+          - { os: ubuntu-latest,  python-version: "3.11" }
+          - { os: ubuntu-latest,  python-version: "3.12" }
+          - { os: ubuntu-latest,  python-version: "3.13" }
+          # ── macOS (arm64): arm 지원 버전 ──
+          - { os: macos-latest,   python-version: "3.11" }
+          - { os: macos-latest,   python-version: "3.12" }
+          - { os: macos-latest,   python-version: "3.13" }
+          # ── Windows ──
+          - { os: windows-latest, python-version: "3.9" }
+          - { os: windows-latest, python-version: "3.11" }
+          - { os: windows-latest, python-version: "3.13" }
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"          # Windows 에서도 UTF-8 파일/콘솔 — 한글 config·로그·이모지 깨짐 방지
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare runtime dirs
+        # OS 중립 (Windows cmd 에는 mkdir -p 없음)
+        run: python -c "import os; os.makedirs('data', exist_ok=True); os.makedirs('logs', exist_ok=True)"
+
+      - name: Run test gate (test_bot.py)
+        # CI 는 시크릿 없이 동작해야 함 — 테스트는 mock 기반(오프라인)
+        run: python tests/test_bot.py
+
+  lint:
+    name: Syntax & import check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Byte-compile all sources (3.8 문법 호환 확인)
+        run: python -m compileall -q zusik main.py security_lock.py tests scripts
+
+  ruff:
+    name: Ruff (버그 위험 룰)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: ruff — 실 버그 위험만 (E9 구문 / F63 비교·assert / F7 / F82 미정의 이름)
+        run: |
+          python -m pip install --upgrade pip ruff
+          ruff check --select=E9,F63,F7,F82 .
+
+  profit-verify:
+    name: 수익률 검증 (청산 로직 합성 백테스트)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: verify_profit.py — 급등 익절 포착 · 본전 보호 · 손실 미실현(hold-floor) 검증
+        run: python scripts/verify_profit.py

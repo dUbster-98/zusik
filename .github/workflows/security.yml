@@ -1,0 +1,53 @@
+name: Security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret 스캔 (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: gitleaks (트래킹 파일에 시크릿 노출 차단)
+        run: |
+          VER=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks detect --no-git --redact --verbose -c .gitleaks.toml --exit-code 1
+
+  dep-audit:
+    name: 의존성 CVE 감사 (pip-audit)
+    runs-on: ubuntu-latest
+    continue-on-error: true        # 자문용 — 전이 의존성 CVE 로 빌드를 막지는 않음(경보만)
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: pip-audit
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt --desc
+
+  integrity:
+    name: 무결성 (security_lock + lock 해시)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.8"    # 운영 서버 버전으로 검증
+      - name: 코드 무결성 트립와이어 (security_manifest.json 기준)
+        run: python security_lock.py verify
+      - name: requirements.lock 해시 핀 유효성 (변조 차단 검증)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes --dry-run -r requirements.lock
