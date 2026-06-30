@@ -24,6 +24,10 @@ IMG_*
 *.zip
 reports/
 
+# WIP 포팅·웹 (별도 작업, 본 패키지에 미포함)
+rust/
+zusik-web/
+
 # 공개 저장소 비공개 문서 — 내부 아키텍처/보안 상세 노출 방지
 CLAUDE.md
 SECURITY_REVIEW_NON_WEB.md

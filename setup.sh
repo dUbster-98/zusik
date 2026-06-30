@@ -200,6 +200,18 @@ EOF
     fi
   fi
 
+  step "매매 시장 — 한국 주식 on/off"
+  if ask_yn "한국 주식도 매매할까요? 안 하면 미국(+암호화폐)만 운용합니다 (Y/n)" "Y"; then
+    info "한국 매매 사용 (kr_enabled 기본값 유지)"
+  else
+    PYBIN_KR="$(command -v python || command -v python3 || true)"
+    if [ -n "$PYBIN_KR" ] && "$PYBIN_KR" scripts/configtool.py set kr_enabled false >/dev/null 2>&1; then
+      info "한국 매매 비활성 (config.local.yaml: kr_enabled=false) — 미국/암호화폐만 운용"
+    else
+      warn "configtool 실행 실패 — 환경 활성화 후 수동: ${C_B}python scripts/configtool.py set kr_enabled false${C_0}"
+    fi
+  fi
+
   if [ "$WMODE" = "2" ]; then
     step "메신저 알림/명령 — 선택 (설정한 백엔드로 동시 발송)"
     if ask_yn "Discord 를 설정할까요? (y/N)" "N"; then

@@ -15,10 +15,10 @@ class SelectionMixin:
         """저장된 선별 결과가 있으면 로드, 없으면 config 기본값."""
         if self.screener and self.auto_screen:
             selected = self.screener.get_selected()
-            if selected.get("kr"):
+            if selected.get("kr") and getattr(self, "kr_enabled", True):
                 self.kr_stocks = self._filter_derivatives(selected["kr"], market="KR")
             else:
-                self.kr_stocks = list(self._default_kr)
+                self.kr_stocks = list(self._default_kr)   # kr_enabled=false 면 [] (기본 풀이 비어있음)
             if selected.get("us") and getattr(self, "us_enabled", True):
                 self.us_stocks = self._filter_derivatives(selected["us"], market="US")
             else:
@@ -167,7 +167,7 @@ class SelectionMixin:
         except Exception:
             pass
 
-        if result.get("kr"):
+        if result.get("kr") and getattr(self, "kr_enabled", True):
             # RS 게이트: 지수 대비 식은 후보 제거 + 강한 순 정렬
             self.kr_stocks = self._rank_by_relative_strength(
                 self._filter_derivatives(result["kr"], market="KR"), "KR")
@@ -202,7 +202,7 @@ class SelectionMixin:
         removed_us = old_us - new_us
 
         # 선별 결과가 빈 경우 기본 종목으로 폴백
-        if not self.kr_stocks:
+        if not self.kr_stocks and getattr(self, "kr_enabled", True):
             self.kr_stocks = list(self._default_kr)
             logger.warning("선별 결과 비어있음, KR 기본 종목 유지")
         if not self.us_stocks and getattr(self, "us_enabled", True):

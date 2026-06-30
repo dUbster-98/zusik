@@ -328,6 +328,8 @@ class PortfolioTracker:
         # 종목별 손익 (이 달 매도 집계) — 리포트의 "어떤 종목이 벌었나" 표
         from collections import defaultdict
         by = defaultdict(lambda: {"name": "", "code": "", "count": 0, "wins": 0, "pnl": 0})
+        # 매도 패턴별 집계 (이 달) — 리포트의 "무엇이 돈을 벌었나" 표. 종합 리포트와 동일 축.
+        bypat = defaultdict(lambda: {"pattern": "", "count": 0, "wins": 0, "pnl": 0})
         for t in self._trades:
             if t.get("type") != "sell" or not str(t.get("date", "")).startswith(prefix):
                 continue
@@ -340,7 +342,15 @@ class PortfolioTracker:
             g["pnl"] += p
             if p > 0:
                 g["wins"] += 1
+            pat = t.get("sell_pattern") or "other"
+            gp = bypat[pat]
+            gp["pattern"] = pat
+            gp["count"] += 1
+            gp["pnl"] += p
+            if p > 0:
+                gp["wins"] += 1
         by_stock = sorted(by.values(), key=lambda x: -x["pnl"])
+        by_pattern = sorted(bypat.values(), key=lambda x: -x["pnl"])
         # 실현손익은 실제 매도 합(=종목별 표 합계)을 우선 — realized_today 가 비어도 정확.
         realized = (sum(g["pnl"] for g in by_stock) if by_stock
                     else sum(c.get("realized_today", 0) or 0 for c in month_data))
@@ -357,6 +367,7 @@ class PortfolioTracker:
             "max_drawdown": round(max_dd, 2),
             "basis": basis,
             "by_stock": by_stock,
+            "by_pattern": by_pattern,
         }
 
     @staticmethod

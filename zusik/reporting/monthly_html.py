@@ -21,6 +21,24 @@ _MUTE = "#656d76"
 _LINE = "#d0d7de"
 _BG = "#f6f8fa"
 
+# 매도 패턴 태그 → 한국어 라벨 (PortfolioTracker._classify_sell_pattern 와 동일 키)
+_PATTERN_LABEL = {
+    "split_profit": "분할 익절",
+    "rsi_overbought": "RSI 과매수 익절",
+    "ambiguous_take": "모호구간 익절",
+    "trailing_stop": "트레일링 스톱",
+    "breakeven_protect": "본전 보호",
+    "forced_stop": "손절선(-15%)",
+    "crash_instant": "급락 즉시매도",
+    "slow_bleed": "느린 출혈",
+    "inverse_eod_lock": "인버스 마감 락인",
+    "inverse_take": "인버스 빠른 익절",
+    "inverse_exit": "인버스 강제청산",
+    "rotate": "종목 교체",
+    "manual": "수동 매도",
+    "other": "기타",
+}
+
 
 def _won(n) -> str:
     try:
@@ -98,6 +116,23 @@ def render_monthly_html(stats: dict, generated_at: str = "") -> str:
                      '<th style="text-align:right">총 손익</th></tr>\n'
                      f'{srows}\n    </table>')
 
+    # 매도 패턴별 손익 (이 달) — "무엇이 돈을 벌었나". 종합 리포트와 동일 축
+    prows = "\n".join(
+        f'      <tr><td>{_html.escape(_PATTERN_LABEL.get(p.get("pattern", ""), p.get("pattern", "")))}</td>'
+        f'<td style="text-align:right">{p.get("count", 0)}</td>'
+        f'<td style="text-align:right">'
+        f'{(p.get("wins", 0) / p["count"] * 100) if p.get("count") else 0:.0f}%</td>'
+        f'<td style="color:{_color(p.get("pnl", 0))};text-align:right">'
+        f'{_won_signed(p.get("pnl", 0))}</td></tr>'
+        for p in stats.get("by_pattern", [])
+    )
+    pattern_section = ("" if not prows else
+                       '\n    <h2>매도 패턴별 손익 (무엇이 돈을 벌었나)</h2>\n    <table>\n'
+                       '      <tr><th>패턴</th><th style="text-align:right">건수</th>'
+                       '<th style="text-align:right">승률</th>'
+                       '<th style="text-align:right">총 손익</th></tr>\n'
+                       f'{prows}\n    </table>')
+
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -149,6 +184,7 @@ def render_monthly_html(stats: dict, generated_at: str = "") -> str:
 {card_html}
     </div>
 {stock_section}
+{pattern_section}
     <div class="foot">
       zusik 자동매매 · 월간 요약 · {_html.escape(basis_label)}
       {gen_html}

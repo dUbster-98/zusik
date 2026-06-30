@@ -1,14 +1,21 @@
 # zusik
 
-> AI 기반 24/7 자동 주식·암호화폐 매매 봇 (한국투자증권·토스증권 OpenAPI)
+> **한국·미국 주식과 코인을 24시간 자동매매하는 봇.** AI가 분석하고, 봇이 사고팔고, 실거래 결과로 스스로 학습합니다.
 
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg)](https://github.com/zusik-py/zusik/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-LLM 멀티 애널리스트 분석과 numpy Monte Carlo 시뮬레이션으로 매매를 결정하고,
-실거래 결과로 파라미터를 **자가 보정(calibration)** 하는 자동매매 봇입니다.
-한국과 미국 주식, 암호화폐를 각 시장 시간에 맞춰 24시간 운용합니다.
+증권사 OpenAPI 에 연결해 돌리는 완성형 매매 봇입니다. **파이썬을 몰라도 `./setup.sh` 한 줄**로 설치·키 입력·설정이 끝납니다.
+
+- **AI 애널리스트 4명이 종목을 토론** — 펀더멘털·센티멘트·퀀트·종합 관점이 성과 가중 투표로 합의
+- **안전망은 AI 없이 즉시 작동** — 급락 감지·트레일링·본전 보호·주문 검증을 추가 비용 0 으로 로컬에서
+- **실거래로 스스로 보정** — 다년 일봉 walk-forward 백테스트로 청산 파라미터를 데이터 기반 조정
+- **증권사 2곳 라이브 검증** — 한국투자증권·토스증권, 국내+미국 모두 (`BROKER` 로 선택)
+- **원하는 시장만** — 한국만 / 미국만 / 코인만 자유롭게 (`kr_enabled`·`us_enabled` 토글)
+- **알림·원격명령** — Discord·Telegram·Slack 으로 폰에서 상태 확인과 매수/매도
+
+> 처음이라면 **모의투자(`KIS_VIRTUAL=true`)** 로 시작하세요. 실거래 손실 위험은 전적으로 본인 책임입니다([면책](#면책-disclaimer)).
 
 ---
 
@@ -91,7 +98,7 @@ flowchart TD
 - **자가 보정 학습**: 다년 일봉 walk-forward 백테스트로 청산 파라미터를 데이터 기반으로 보정
 - **인버스 ETF 헷지·수익화**: 지속적 위기에서만 발동해 단발 급락 휩쏘를 피한다. 기초지수가
   실제로 빠질 때만 사고(시장별 무차별 매수 차단), 순익 +1.5% 면 바로 익절해 작은 수익을 챙긴다 (`inverse.*`)
-- **멀티 마켓**: 한국·미국 주식과 업비트 암호화폐를 각 시장 시간에 맞춰 운용. 미국은 `us_enabled` 로 끌 수 있다
+- **멀티 마켓**: 한국·미국 주식과 업비트 암호화폐를 각 시장 시간에 맞춰 운용. 시장별로 끌 수 있다(`us_enabled` / `kr_enabled`)
 - **멀티 메신저 양방향**: Discord, Telegram, Slack 동시 알림과 명령 원격 제어 지원 (백엔드 교체식)
 - **AI 사용량 최적화**: claude/codex/agy(Antigravity) 멀티 CLI 분산, provider 실패 자동 cooldown,
   요금제·개수에 맞춘 일일 한도 자동 설정(`setup.sh` 마법사), 웹검색/캐시 조절. CLI 가 없어도 로컬
@@ -126,9 +133,15 @@ flowchart TD
 파이썬을 몰라도 됩니다. `setup.sh` 가 설치, 키 입력, 권한 설정까지 알아서 처리합니다.
 
 **준비물 3가지**
-1. **KIS 계좌 + 앱 키**: [한국투자증권 OpenAPI](https://apiportal.koreainvestment.com) 에서 무료 발급 (모의투자 지원)
+1. **증권사 계좌 + 앱 키**: [한국투자증권 OpenAPI](https://apiportal.koreainvestment.com) 에서 무료 발급 (모의투자 지원).
+   **토스증권**([developers.tossinvest.com](https://developers.tossinvest.com/docs))도 됩니다 — `.env` 에 `BROKER=toss` 와 토스 키를 넣으면 됩니다(국내·미국 모두 지원). 자세한 건 [지원 브로커](#지원-브로커) 참고
 2. **항상 켜둘 컴퓨터**: 24/7 매매라 꺼지면 멈춥니다 (PC, 서버, Mac mini, Windows **WSL** 모두 가능)
 3. (선택) **Discord**: 폰으로 매매 알림 받고 원격 명령
+
+> **특정 시장만 하고 싶다면**: 미국을 안 하면 `kr`/암호화폐만, 한국을 안 하면 `us`/암호화폐만 돌릴 수
+> 있습니다. `./setup.sh --config` 마법사가 물어보며, 직접 끄려면
+> `python3 scripts/configtool.py set us_enabled false` (미국 끄기) 또는
+> `python3 scripts/configtool.py set kr_enabled false` (한국 끄기) 를 실행하세요.
 
 ```bash
 # 1) 설치: uv 로 .venv 생성 + 의존성 + 테스트 검증을 한 번에 (OS 자동 감지)

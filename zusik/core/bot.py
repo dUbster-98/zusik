@@ -282,20 +282,23 @@ class TradingBot(
             "derivative_etf_enabled", True
         )
 
-        # 미국 매매 토글 — 미국 주식을 안 하는 사용자는 config us_enabled: false 로 끈다(기본 true).
-        # 끄면 _default_us 와 선별 US 가 비워져 us_stocks 가 항상 [] → 미국 매매·알림·잔고조회가
-        # 일괄 차단되고 run_us 도 조기 반환한다.
+        # 시장 토글 — 안 하는 시장은 config 로 끈다(둘 다 기본 true). us_enabled / kr_enabled.
+        # 끄면 해당 시장 기본 풀과 선별 결과가 비워져 종목 리스트가 항상 [] → 매매·알림·잔고조회가
+        # 일괄 차단되고 run_us / run_kr 도 조기 반환한다. (crypto 는 별도 — 영향 없음)
         self.us_enabled: bool = bool(config.get("us_enabled", True))
+        self.kr_enabled: bool = bool(config.get("kr_enabled", True))
 
         # 종목 리스트 — config 기본 풀에서 파생ETF 제거 (권한 없을 때)
         self._default_kr: list[dict] = self._filter_derivatives(
             config.get("stocks", []), market="KR"
-        )
+        ) if self.kr_enabled else []
         self._default_us: list[dict] = self._filter_derivatives(
             config.get("us_stocks", []), market="US"
         ) if self.us_enabled else []
         if not self.us_enabled:
             logger.info("미국 매매 비활성 (config us_enabled=false) — KR/crypto 만 운용")
+        if not self.kr_enabled:
+            logger.info("한국 매매 비활성 (config kr_enabled=false) — US/crypto 만 운용")
         self._load_stocks()
 
         self.invest_ratio: float = config.get("invest_ratio", 0.1)

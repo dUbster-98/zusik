@@ -1839,6 +1839,25 @@ class TradingBotScenarioTests(unittest.TestCase):
             # 시작 10만 + 입금 10만 = 20만 투입인데 종료 11만 → return_pct 음수
             self.assertLess(stats["return_pct"], 0)
 
+            # 매도 패턴별 손익 집계 (리포트 "무엇이 돈을 벌었나" 섹션) — 같은 달 매도만, 패턴별 묶음
+            t._trades = [
+                {"type": "sell", "date": "2026-03-10", "code": "A", "realized_pnl": 30_000,
+                 "sell_pattern": "rsi_overbought"},
+                {"type": "sell", "date": "2026-03-12", "code": "B", "realized_pnl": 10_000,
+                 "sell_pattern": "rsi_overbought"},
+                {"type": "sell", "date": "2026-03-20", "code": "C", "realized_pnl": -8_000,
+                 "sell_pattern": "crash_instant"},
+                {"type": "sell", "date": "2026-04-01", "code": "D", "realized_pnl": 99_000,
+                 "sell_pattern": "rsi_overbought"},  # 다른 달 → 제외돼야
+            ]
+            stats = t.get_monthly_stats(2026, 3)
+            bypat = {p["pattern"]: p for p in stats["by_pattern"]}
+            self.assertEqual(bypat["rsi_overbought"]["count"], 2)      # 4월 건 제외
+            self.assertEqual(bypat["rsi_overbought"]["pnl"], 40_000)
+            self.assertEqual(bypat["rsi_overbought"]["wins"], 2)
+            self.assertEqual(bypat["crash_instant"]["pnl"], -8_000)
+            self.assertEqual(stats["by_pattern"][0]["pattern"], "rsi_overbought")  # pnl 내림차순
+
     def test_regression_stub_covers_all_discord_notifier_methods(self):
         """회귀 (2026-04-20): `_BotNotifierFallback`이 `DiscordNotifier`의
         모든 `notify_*` 메서드에 응답해야 한다. 미구현 시 AttributeError로
@@ -7018,10 +7037,55 @@ class UsTradingToggleTests(unittest.TestCase):
         b.client.is_us_market_open.assert_not_called()   # us_enabled 게이트가 먼저 차단
 
 
+class KrTradingToggleTests(unittest.TestCase):
+    """한국 매매 토글(config kr_enabled). false 면 kr_stocks 가 비고 run_kr 이 즉시 반환.
+
+    되돌리면(토글 무시) 한국을 안 하는 사용자도 KR 매매·종목선별이 돌아간다."""
+
+    def _bot(self, kr_enabled):
+        from zusik.core.bot import TradingBot
+        b = TradingBot.__new__(TradingBot)
+        b.kr_enabled = kr_enabled
+        b.us_enabled = True
+        b.screener = None
+        b.auto_screen = False
+        b._default_kr = [{"code": "005930", "name": "삼성전자"}] if kr_enabled else []
+        b._default_us = [{"ticker": "F", "name": "Ford"}]
+        return b
+
+    def test_kr_disabled_empties_kr_stocks(self):
+        b = self._bot(False)
+        b._load_stocks()
+        self.assertEqual(b.kr_stocks, [])          # 한국 종목 없음 → 매매/선별 게이트 통과 못 함
+        self.assertTrue(b.us_stocks)               # US 는 그대로 운용
+
+    def test_kr_enabled_keeps_kr_stocks(self):
+        b = self._bot(True)
+        b._load_stocks()
+        self.assertEqual([s["code"] for s in b.kr_stocks], ["005930"])
+
+    def test_screener_kr_ignored_when_disabled(self):
+        # 저장된 선별 결과에 KR 이 있어도 kr_enabled=false 면 무시돼야 한다.
+        b = self._bot(False)
+        b.screener = Mock()
+        b.auto_screen = True
+        b.screener.get_selected.return_value = {"kr": [{"code": "000660"}], "us": []}
+        b._filter_derivatives = lambda lst, market: lst
+        b._load_stocks()
+        self.assertEqual(b.kr_stocks, [])
+
+    def test_run_kr_returns_early_when_disabled(self):
+        b = self._bot(False)
+        b.client = Mock()
+        b.run_kr()
+        b.client.is_market_open.assert_not_called()   # kr_enabled 게이트가 먼저 차단
+
+
 def run_runtime_unittests():
     print("\n[6/6] 런타임 계약 unittest")
     suite = unittest.TestSuite()
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(UsTradingToggleTests))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(KrTradingToggleTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(TradingBotRuntimeTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(TradingBotScenarioTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(LossPatternRegressionTests))

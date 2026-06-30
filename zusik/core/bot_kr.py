@@ -497,6 +497,8 @@ class KRTradingMixin:
 
     def run_kr(self):
         """한국 주식 매매 (장중에만)."""
+        if not getattr(self, "kr_enabled", True):
+            return   # config kr_enabled=false — 한국 매매 전면 비활성
         if not self.client.is_market_open():
             return
         # 동시 실행 가드 — 개장 즉시 사이클 + 스케줄 run_once 겹침 방지 (중복 매수 차단)

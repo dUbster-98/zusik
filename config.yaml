@@ -229,6 +229,11 @@ stocks:
 # 변경 권장: python scripts/configtool.py set us_enabled false  (config.local.yaml 에 기록)
 us_enabled: true
 
+# 한국 매매 on/off — 한국 주식을 안 하는 사용자는 false 로 끈다(기본 true).
+# false 면 한국 매수/매도·종목선별이 전부 비활성(US/crypto 만 운용). 둘 다 false 면 crypto 만.
+# 변경 권장: python scripts/configtool.py set kr_enabled false  (config.local.yaml 에 기록)
+kr_enabled: true
+
 us_stocks:
 # 저가 메가캡 + 디펜시브 (주가 ≤ $60)
 - ticker: F

@@ -2,6 +2,20 @@
 
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/), 버전은 [SemVer](https://semver.org)를 따른다.
 
+## [1.0.1] - 2026-06-30
+
+### 추가
+- 한국 매매 on/off 토글(`kr_enabled`). 미국만/암호화폐만 운용하려는 사용자를 위해 한국 주식을
+  끌 수 있다. `setup.sh` 마법사가 묻고, `configtool.py set kr_enabled false` 로도 끈다.
+  (기존 `us_enabled` 와 대칭 — 둘 다 끄면 암호화폐만)
+- 월간 리포트에 **매도 패턴별 손익** 섹션 추가. 종합 리포트와 같은 축으로 "무엇이 돈을 벌었나"를
+  월 단위로 보여준다(패턴 한국어 라벨·건수·승률·손익).
+
+### 문서
+- README 첫 블록을 더 직관적으로 개편 — 한 줄 가치 제안 + 스캔 가능한 볼드 불릿(구체적 수치).
+- 빠른 시작 "준비물"에 토스증권도 쓸 수 있음을 명시(`BROKER=toss`, 국내·미국 지원).
+- 시장별 끄기 안내 추가.
+
 ## [1.0.0] - 2026-06-30
 
 첫 공개 릴리스. 한국·미국 주식과 암호화폐를 시장 시간에 맞춰 24시간 자동매매하는 봇이다.
@@ -62,4 +76,5 @@ LLM 멀티 애널리스트 분석과 Monte Carlo 시뮬레이션으로 판단하
   차례로 안내한다.
 - Python 3.8+. 핵심 의존성만 쓰고 해시로 핀한다(`requirements.lock`).
 
+[1.0.1]: https://github.com/zusik-py/zusik/releases/tag/v1.0.1
 [1.0.0]: https://github.com/zusik-py/zusik/releases/tag/v1.0.0

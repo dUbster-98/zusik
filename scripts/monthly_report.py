@@ -36,6 +36,12 @@ _EXAMPLE_STATS = {
         {"name": "Example Co", "code": "DEMO", "count": 4, "wins": 3, "pnl": 80_000},
         {"name": "예시 종목 C", "code": "000003", "count": 2, "wins": 0, "pnl": -38_000},
     ],
+    "by_pattern": [
+        {"pattern": "rsi_overbought", "count": 6, "wins": 6, "pnl": 240_000},
+        {"pattern": "split_profit", "count": 4, "wins": 4, "pnl": 150_000},
+        {"pattern": "breakeven_protect", "count": 3, "wins": 2, "pnl": 20_000},
+        {"pattern": "crash_instant", "count": 1, "wins": 0, "pnl": -38_000},
+    ],
 }
 
 
