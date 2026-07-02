@@ -134,7 +134,7 @@ class CoreHelpersMixin:
         """새 커밋 감지 → 메신저 알림 + 반영 여부 선택.
 
         **로컬 커밋·원격 push 둘 다 알림**. 같은 서버에서 commit+push 하면 로컬==origin 이라
-        예전엔(origin-ahead 만 봐서) 알림이 안 떴음 → 최신 커밋(origin 이 앞서면 origin/master,
+        예전엔(origin-ahead 만 봐서) 알림이 안 떴음 → 최신 커밋(원격이 앞서면 추적 브랜치,
         아니면 로컬 HEAD) 이 직전 알린 것과 다르면 알린다. 적용은 Discord 버튼 또는 '업데이트'
         명령(git pull + 재시작). 로컬 커밋은 pull 할 게 없고 재시작으로 반영됨.
         """
@@ -149,13 +149,22 @@ class CoreHelpersMixin:
                 capture_output=True, text=True, timeout=15, cwd=repo_dir,
             )
 
-            # origin 이 로컬보다 앞선 커밋 수 (당겨올 push). >0 이면 origin, 아니면 로컬 HEAD 기준.
+            # 추적 브랜치를 동적으로 감지 — 공개 저장소는 main, dev 는 master 라
+            # origin/master 하드코딩이면 main 클론에서 원격 커밋을 영영 못 본다.
+            up = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+                capture_output=True, text=True, timeout=5, cwd=repo_dir,
+            )
+            upstream = (up.stdout.strip()
+                        if up.returncode == 0 and up.stdout.strip() else "origin/master")
+
+            # 원격이 로컬보다 앞선 커밋 수 (당겨올 push). >0 이면 원격, 아니면 로컬 HEAD 기준.
             behind = subprocess.run(
-                ["git", "rev-list", "--count", "HEAD..origin/master"],
+                ["git", "rev-list", "--count", f"HEAD..{upstream}"],
                 capture_output=True, text=True, timeout=5, cwd=repo_dir,
             )
             n = int(behind.stdout.strip()) if behind.returncode == 0 and behind.stdout.strip().isdigit() else 0
-            ref = "origin/master" if n > 0 else "HEAD"
+            ref = upstream if n > 0 else "HEAD"
 
             # %h hash, %s subject, %an author, %cr relative date, %cI ISO date
             result = subprocess.run(

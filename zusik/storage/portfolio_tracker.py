@@ -740,6 +740,58 @@ class PortfolioTracker:
         except Exception:
             return None
 
+    @staticmethod
+    def classify_entry_bucket(reason: str) -> str:
+        """매수 사유 → 진입 버킷. leftover/force_buy가 +EV인지 상시 관측용."""
+        r = reason or ""
+        if "수동" in r:
+            return "manual"
+        if "잔금" in r or "잔여" in r:
+            return "leftover"
+        if "강제매수" in r:
+            return "force_buy"
+        if "유휴" in r:
+            return "idle_cash"
+        return "normal"
+
+    def get_entry_bucket_stats(self, days: int | None = None, month: str = "") -> dict:
+        """진입 버킷별 실현손익 집계 — {bucket: {n, wins, pnl}}.
+
+        매도는 같은 종목의 직전 매수 사유에 귀속(다중 매수 포지션은 근사치).
+        entry_roi.py CLI와 월간 리포트가 공유. 시장 국면이 바뀌어 leftover가
+        음수 전환하는지 운영자가 놓치지 않게 하는 관측 장치.
+        month="YYYY-MM"이면 해당 월 매도만 — 월간 결산과 같은 기간축."""
+        cutoff = ""
+        if days:
+            from datetime import timedelta
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        last_buy: dict = {}
+        stats: dict = {}
+        for t in self._trades:
+            code = t.get("code")
+            if t.get("type") == "buy":
+                last_buy[code] = self.classify_entry_bucket(t.get("reason"))
+            elif t.get("type") == "sell":
+                if cutoff and str(t.get("date", "")) < cutoff:
+                    continue
+                if month and not str(t.get("date", "")).startswith(month):
+                    continue
+                b = last_buy.get(code, "unknown")
+                pnl = t.get("realized_pnl", t.get("pnl", 0)) or 0
+                s = stats.setdefault(b, {"n": 0, "wins": 0, "pnl": 0})
+                s["n"] += 1
+                s["wins"] += 1 if pnl > 0 else 0
+                s["pnl"] += pnl
+        return stats
+
+    def get_last_buy_reason(self, code: str) -> str:
+        """종목의 마지막 매수 사유 문자열 (없으면 ""). 다중 매수 포지션은 마지막 매수
+        기준이라 근사치 — 수동/자동 구분(학습 제외) 용도로는 충분."""
+        for t in reversed(self._trades):
+            if t.get("type") == "buy" and t.get("code") == code:
+                return str(t.get("reason") or "")
+        return ""
+
     # ── 장기투자 관리 ──
 
     def _add_long_term(self, code: str, name: str, qty: int, price: int, reason: str):

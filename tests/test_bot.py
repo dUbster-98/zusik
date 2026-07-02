@@ -206,6 +206,12 @@ class FakeTracker:
         self._trades = []
         self._long_term = []
 
+    def get_last_buy_reason(self, code):
+        for t in reversed(self._trades):
+            if t.get("type") == "buy" and t.get("code") == code:
+                return str(t.get("reason") or "")
+        return ""
+
     def record_buy(self, code, name, qty, price, is_long_term=False, reason=""):
         now = datetime.now()
         self._trades.append({
@@ -314,6 +320,35 @@ class FakeTracker:
                     "avg_pct": (s["pnl_sum"]/s["amount_sum"]*100) if s["amount_sum"] else 0.0,
                     "amount_sum": s["amount_sum"]}
                 for p, s in stats.items()}
+
+    @staticmethod
+    def classify_entry_bucket(reason: str) -> str:
+        from zusik.storage.portfolio_tracker import PortfolioTracker
+        return PortfolioTracker.classify_entry_bucket(reason)
+
+    def get_entry_bucket_stats(self, days: int | None = None, month: str = "") -> dict:
+        """실제 PortfolioTracker와 같은 진입 버킷 집계 계약."""
+        cutoff = ""
+        if days:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        last_buy = {}
+        stats = {}
+        for t in self._trades:
+            code = t.get("code")
+            if t.get("type") == "buy":
+                last_buy[code] = self.classify_entry_bucket(t.get("reason"))
+            elif t.get("type") == "sell":
+                if cutoff and str(t.get("date", "")) < cutoff:
+                    continue
+                if month and not str(t.get("date", "")).startswith(month):
+                    continue
+                bucket = last_buy.get(code, "unknown")
+                pnl = t.get("realized_pnl", t.get("pnl", 0)) or 0
+                s = stats.setdefault(bucket, {"n": 0, "wins": 0, "pnl": 0})
+                s["n"] += 1
+                s["wins"] += 1 if pnl > 0 else 0
+                s["pnl"] += pnl
+        return stats
 
 
 class FakeKISClient:
@@ -718,6 +753,165 @@ class TradingBotRuntimeTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(before_cash - balance["cash"], 300_000)
         self.assertEqual(balance["holdings"][0]["qty"], 6)
+
+    def test_small_account_trades_despite_dynamic_throttle(self):
+        """소액/중소 계좌가 동적 스로틀에 막혀 매매 전면 정지되던 버그(사용자 2026-07-01, 20만 계좌:
+        14% 스로틀 → 28k → min_amount 미달 → 스킵). (a) 정확히 20만(=min×2 경계)은 소액 올인,
+        (b) 30만+스로틀은 min 미달이어도 최소주문은 태운다. 되돌리면(경계 <, 바닥 없음) buy 0건."""
+        self.bot.min_amount = 100_000
+        # 대형계좌 리스크 제어(스로틀)가 소액에선 '주문 불가'로 변질되는 상황 재현
+        self.bot._dynamic_invest_ratio = Mock(side_effect=lambda r, c, **k: (0.14, "throttle"))
+        price = 94_300
+        df = make_price_df(price)
+        self.client.set_kr_price("069620", price, name="코웨이")
+
+        # (a) 정확히 20만 → 소액 올인 (스로틀 우회, 2주 ≈ 95%)
+        self.client.kr_cash = 200_000
+        self.client.buy_market_calls.clear()
+        with patch("zusik.clients.discord_bot.send_trade_alert"):
+            self.bot._handle_buy("069620", "코웨이", price, df=df)
+        self.assertTrue(self.client.buy_market_calls, "20만 소액계좌가 매매 못 함 — 경계 탈락 버그")
+        self.assertEqual(self.client.buy_market_calls[-1][1], 2, "소액은 올인(2주)")
+
+        # (b) 30만 + 스로틀 14% → invest 42k < min 100k → 최소주문(100k) 상향 → 1주
+        self.client.kr_cash = 300_000
+        self.client.buy_market_calls.clear()
+        with patch("zusik.clients.discord_bot.send_trade_alert"):
+            self.bot._handle_buy("069620", "코웨이", price, df=df)
+        self.assertTrue(self.client.buy_market_calls, "중소계좌가 스로틀에 막혀 매매 못 함")
+        self.assertEqual(self.client.buy_market_calls[-1][1], 1, "min_amount 바닥으로 1주")
+
+    def test_small_account_one_share_when_price_in_allin_band(self):
+        """회귀: 95% 올인 밴드 갭 — 주가가 (현금×0.95, 현금] 구간이면
+        invest//price=0으로 조용히 포기 → 완전 소액 계좌에선 매매 정지와 동일.
+        현금이 1주를 감당하면 1주는 태워야 한다. 되돌리면 buy 0건."""
+        self.bot.min_amount = 5_000
+        price = 48_000
+        df = make_price_df(price)
+        self.client.set_kr_price("069620", price, name="코웨이")
+        self.client.kr_cash = 50_000  # invest 47,500 < 주가 48,000 ≤ 현금 50,000
+        self.client.buy_market_calls.clear()
+        with patch("zusik.clients.discord_bot.send_trade_alert"):
+            self.bot._handle_buy("069620", "코웨이", price, df=df)
+        self.assertTrue(self.client.buy_market_calls,
+                        "올인 밴드(현금×0.95 < 주가 ≤ 현금)에서 소액 계좌가 매수 포기")
+        self.assertEqual(self.client.buy_market_calls[-1][1], 1, "1주 상향이어야 함")
+
+    def test_small_account_us_one_share_when_price_in_allin_band(self):
+        """US 동일 갭: invest $95 < 주가 $97 ≤ 현금 $100(지정가 버퍼 1.005 감당) → 1주."""
+        self.bot.min_amount_usd = 5
+        self.client.us_cash_usd = 100.0
+        price = 97.0
+        with patch("zusik.clients.discord_bot.send_trade_alert"):
+            self.bot._handle_us_buy("AAPL", "Apple", price, "NASD", df=make_price_df(price))
+        holdings = self.client.get_us_balance()["holdings"]
+        self.assertTrue(holdings, "US 올인 밴드에서 소액 계좌가 매수 포기")
+        self.assertEqual(holdings[0]["qty"], 1, "US 1주 상향이어야 함")
+
+    def test_manual_entry_sell_routes_reward_to_manual_bucket(self):
+        """회귀: 수동 명령으로 산 종목의 매도는 자동 전략 학습(reward)에 섞이지 않고
+        strategy_name='manual' 별도 버킷으로 — 수동 손익이 전략 EMA를 오염하면
+        사이징이 왜곡된다. 일반 진입은 기존대로 전략 이름."""
+        self.client.kr_holdings["005930"] = {"qty": 5, "avg_price": 50_000, "name": "삼성전자"}
+        self.client.kr_cash = 50_000
+        self.client.set_kr_price("005930", 60_000, name="삼성전자")
+        self.tracker.record_buy("005930", "삼성전자", 5, 50_000, False, "수동 명령")
+        self.tracker._trades[-1]["timestamp"] = (datetime.now() - timedelta(minutes=11)).isoformat()
+        self.bot.reward.record_trade_result = Mock()
+        with patch("zusik.clients.discord_bot.send_trade_alert"):
+            self.bot._handle_sell("005930", "삼성전자")
+        kw = self.bot.reward.record_trade_result.call_args.kwargs
+        self.assertEqual(kw.get("strategy_name"), "manual", "수동 진입이 전략 버킷으로 학습됨")
+
+    def test_entry_bucket_stats_attributes_sells_to_last_buy(self):
+        """진입 버킷 ROI 집계(월간 리포트·entry_roi.py 공용): 매도를 직전 매수
+        사유 버킷에 귀속, 승률/손익 집계가 정확해야 한다."""
+        from zusik.storage.portfolio_tracker import PortfolioTracker
+        tr = PortfolioTracker.__new__(PortfolioTracker)
+        tr._trades = [
+            {"type": "buy", "code": "A", "reason": "잔금 소진 매수", "date": "2026-06-01"},
+            {"type": "sell", "code": "A", "realized_pnl": 1000, "date": "2026-06-02"},
+            {"type": "buy", "code": "B", "reason": "수동 명령", "date": "2026-06-03"},
+            {"type": "sell", "code": "B", "realized_pnl": -500, "date": "2026-06-04"},
+            {"type": "buy", "code": "C", "reason": "[단기] 모멘텀", "date": "2026-06-05"},
+            {"type": "sell", "code": "C", "realized_pnl": 300, "date": "2026-06-06"},
+        ]
+        s = tr.get_entry_bucket_stats()
+        self.assertEqual(s["leftover"], {"n": 1, "wins": 1, "pnl": 1000})
+        self.assertEqual(s["manual"], {"n": 1, "wins": 0, "pnl": -500})
+        self.assertEqual(s["normal"], {"n": 1, "wins": 1, "pnl": 300})
+
+        # month= 필터: 월간 결산과 같은 기간축 (rolling 31일 아님)
+        tr._trades.append({"type": "sell", "code": "C", "realized_pnl": 700,
+                           "date": "2026-07-01"})
+        s6 = tr.get_entry_bucket_stats(month="2026-06")
+        self.assertEqual(s6["normal"], {"n": 1, "wins": 1, "pnl": 300},
+                         "월 필터가 다음 달 매도를 포함함")
+
+        # HTML 월간 리포트에도 진입 유형 표 포함
+        from zusik.reporting.monthly_html import render_monthly_html
+        html = render_monthly_html({"month": "2026-06", "days": 20, "return_pct": 1.0,
+                                    "start_equity": 1, "end_equity": 1, "deposits": 0,
+                                    "realized": 0, "max_drawdown": 0,
+                                    "entry_buckets": s6})
+        self.assertIn("진입 유형별 손익", html)
+        self.assertIn("잔금소진", html)
+
+    def test_full_flow_buy_leftover_sell_reward_monthly_report(self):
+        """전체 플로 회귀: 일반 매수 뒤 잔금소진 진입이 기록되고, 매도 reward와
+        월간 진입 유형 리포트까지 같은 bucket으로 이어져야 한다.
+
+        수익 극대화 관점에서 이 연결이 끊기면 leftover가 +EV인지 관측할 수 없고,
+        reward/월간 리포트가 서로 다른 수익 구조를 보게 된다."""
+        month = datetime.now().strftime("%Y-%m")
+
+        # 1) 일반 KR 매수 경로: 주문·포지션·tracker buy가 함께 기록되는지 확인.
+        self.client.kr_cash = 1_000_000
+        self.bot._dynamic_invest_ratio = Mock(side_effect=lambda r, c, **k: (0.5, "flow-test"))
+        with patch("zusik.clients.discord_bot.send_trade_alert"):
+            self.bot._handle_buy("005930", "삼성전자", 50_000, df=make_price_df(50_000))
+        self.assertTrue(self.client.buy_market_calls, "일반 매수 주문이 발생하지 않음")
+        self.assertTrue(any(t.get("type") == "buy" and t.get("code") == "005930"
+                            for t in self.tracker._trades),
+                        "일반 매수가 tracker에 기록되지 않음")
+
+        # 2) 잔금소진성 추가 진입을 실제 주문 성공 + 동일 회계 기록으로 재현.
+        self.client.buy_market("035420", 1)
+        self.bot.positions.record_buy("035420", "네이버", 1, 200_000)
+        self.tracker.record_buy("035420", "네이버", 1, 200_000, False, "잔금 소진 매수")
+        self.tracker._trades[-1]["timestamp"] = (datetime.now() - timedelta(minutes=11)).isoformat()
+        self.assertEqual(self.tracker.classify_entry_bucket(self.tracker._trades[-1]["reason"]),
+                         "leftover")
+
+        # 3) 잔금소진 포지션 매도 → reward가 자동 전략 bucket으로 기록되고 실현손익 발생.
+        self.client.set_kr_price("035420", 220_000, name="네이버")
+        self.bot.reward.record_trade_result = Mock()
+        self.bot._handle_sell("035420", "네이버")
+        self.assertTrue(self.client.sell_market_calls, "잔금소진 포지션 매도 주문이 발생하지 않음")
+        reward_kw = self.bot.reward.record_trade_result.call_args.kwargs
+        self.assertEqual(reward_kw.get("strategy_name"), self.strategy.name)
+        self.assertGreater(reward_kw.get("realized_pnl", 0), 0)
+
+        # 4) 같은 매도 결과가 월간 entry bucket ROI와 텍스트/HTML 리포트에 연결돼야 한다.
+        buckets = self.tracker.get_entry_bucket_stats(month=month)
+        self.assertEqual(buckets["leftover"], {"n": 1, "wins": 1, "pnl": 20_000})
+
+        stats = {
+            "month": month, "days": 1, "start_equity": 1_000_000,
+            "end_equity": 1_020_000, "deposits": 0, "realized": 20_000,
+            "net_growth": 20_000, "return_pct": 2.0, "max_drawdown": 0.0,
+            "basis": "effective", "entry_buckets": buckets,
+        }
+        from zusik.reporting.monthly_text import format_monthly_report
+        from zusik.reporting.monthly_html import render_monthly_html
+        text = format_monthly_report(stats)
+        html = render_monthly_html(stats)
+        self.assertIn(f"진입 유형별 ({month})", text)
+        self.assertIn("leftover", text)
+        self.assertIn("+20,000원", text)
+        self.assertIn("진입 유형별 손익", html)
+        self.assertIn("잔금소진", html)
+        self.assertIn("+20,000원", html)
 
     def test_handle_sell_returns_none_and_updates_balance(self):
         self.client.kr_holdings["005930"] = {"qty": 5, "avg_price": 50_000, "name": "삼성전자"}
@@ -1128,7 +1322,7 @@ class TradingBotScenarioTests(unittest.TestCase):
         self.config["inverse"] = {"enabled": True, "max_ratio": 0.5,
                                   "trigger_crisis": True, "trigger_index_crash": True,
                                   "quick_profit_pct": 0, "reversal_lock_pct": 0}
-        inv_df_up = make_ohlcv_df([4_800] * 18 + [4_900, 5_000])
+        inv_df_up = make_ohlcv_df([4_800] * 19 + [5_000])   # 직전 4800 → 5000 = +4.17% (지수 -4.2% 급락 반영)
 
         def _reset_caches():
             bot._crash_cache = (0.0, False)
@@ -2025,6 +2219,64 @@ class TradingBotScenarioTests(unittest.TestCase):
                            "avoid_new_buy": True, "min_buy_confidence": 0.95}, f)
             allow, _ = self.bot._pre_market_buy_gate("KR", 0.4)
             self.assertTrue(allow)  # stale → 통과
+
+    def test_regression_adaptive_backtest_confidence_unblocks_cautious_day(self):
+        """회귀: adaptive 확신도가 RSI 스텁(중립=0.5 고정)이라 장전 cautious
+        (요구 0.55) 날에 로컬 전략 매수가 전면 정지 → 계좌 현금 8M이 놀았다.
+        백테스트 검증 점수가 확신도에 반영돼 edge 있는 전략(score≥0.1)은 통과해야 한다.
+        """
+        from zusik.strategies.auto_hybrid import AutoHybridStrategy
+
+        s = AutoHybridStrategy.__new__(AutoHybridStrategy)
+
+        class _A:
+            pass
+        a = _A()
+        s._adaptive = a
+
+        # 라이브 실측 케이스: dual_momentum 승률 44%·score 0.472 — 승률은 낮아도
+        # edge 강함 → cautious 요구치(0.55) 이상이어야 한다
+        a._global_best = object()
+        a._global_scores = [{"score": 0.472, "avg_win": 0.44, "trades_total": 355}]
+        a._last_scores = []
+        conf = s._backtest_confidence()
+        self.assertIsNotNone(conf)
+        self.assertGreaterEqual(conf, 0.55)
+        self.assertLessEqual(conf, 0.70)
+
+        # 표본 부족(거래 <5) → None (스텁 0.5 유지 = 게이트 차단 유지)
+        a._global_best = None
+        a._global_scores = []
+        a._last_scores = [{"score": 0.9, "trades": 2}]
+        self.assertIsNone(s._backtest_confidence())
+
+        # 약한 edge(score 0.05)는 cautious 못 넘음 — 게이트가 죽지 않았는지 revert-check
+        a._last_scores = [{"score": 0.05, "trades": 20}]
+        self.assertLess(s._backtest_confidence(), 0.55)
+
+        # 점수 데이터 자체가 없으면 None (초기 기동)
+        a._last_scores = []
+        self.assertIsNone(s._backtest_confidence())
+
+    def test_regression_discord_owner_unset_fails_closed(self):
+        """회귀: DISCORD_OWNER_ID 미설정 시 소유자 명령은 거부돼야 한다(fail-closed).
+        이전엔 서버 관리자 폴백 → 관리자 계정 탈취 = 원격 매매/업데이트 권한이었다."""
+        try:
+            from zusik.clients import discord_bot as db
+        except Exception:
+            self.skipTest("discord 미설치 환경")
+        admin = Mock()
+        admin.user.id = 12345
+        admin.user.guild_permissions.administrator = True
+        with patch.object(db, "_OWNER_ID", 0):
+            self.assertFalse(db._is_owner(admin), "OWNER_ID 미설정인데 관리자 폴백 허용됨")
+        with patch.object(db, "_OWNER_ID", 12345):
+            self.assertTrue(db._is_owner(admin), "소유자 본인이 거부됨")
+        # .env.example 그대로 복사(DISCORD_OWNER_ID= 빈 값)해도 import 크래시 없이 0
+        self.assertEqual(db._parse_owner_id(""), 0)
+        self.assertEqual(db._parse_owner_id(None), 0)
+        self.assertEqual(db._parse_owner_id("abc"), 0)
+        self.assertEqual(db._parse_owner_id("12345"), 12345)
 
     def test_regression_analyze_sentiment_keyword_scoring(self):
         """_analyze_pre_market_sentiment 키워드 점수 기반 판정."""
@@ -2942,23 +3194,29 @@ class LossPatternRegressionTests(unittest.TestCase):
         b = TradingBot.__new__(TradingBot)
         # learning_enabled=False → 빠른익절 테스트는 고정 임계(seed) 경로를 결정론적으로 검증.
         b.config = {"inverse": cfg if cfg is not None else {
-            "entry_min_rise_pct": 1.0, "reversal_lock_pct": 1.5, "eod_lock_min_profit": 0.003,
+            "entry_index_drop_pct": 2.5, "reversal_lock_pct": 1.5, "eod_lock_min_profit": 0.003,
             "quick_profit_pct": 1.5, "learning_enabled": False}}
         return b
 
-    def test_inverse_entry_requires_etf_rising(self):
-        """신규 인버스 매수는 그 ETF가 장중 상승(+1%↑=기초지수 하락) 일 때만. KOSPI만 빠질 때
-        안 빠지는 시장(나스닥/코스닥)의 인버스는 안 올라 매수 차단. 되돌리면(전역 게이트만)
-        다른 시장 인버스까지 무차별 매수해 손실."""
+    def test_inverse_entry_requires_index_crash_leverage_aware(self):
+        """신규 인버스 매수는 그 ETF의 상승이 '기초지수 급락 수준'(함의 낙폭 ≥2.5%)일 때만.
+        +1.5% 노이즈 상승(지수 -1.5%)으로는 안 산다 — KOSPI만 빠질 때 나스닥 인버스(409820)까지
+        무차별 매수해 손실나던 실측 버그(사용자 2026-07-01 지적). 되돌리면(단순 +1% 게이트)
+        안 빠지는 시장 인버스까지 산다. 레버리지 정규화도 검증: -2X 는 2배 상승 필요."""
         b = self._inv_helper_bot()
-        rising = make_ohlcv_df([100] * 18 + [101, 103])   # prev 101 → price 103 = +1.98%
-        flat = make_ohlcv_df([100] * 20)                  # 0%
-        self.assertTrue(b._inverse_entry_confirms(103, rising)[0])    # 이 시장 빠짐 → 매수 허용
-        self.assertFalse(b._inverse_entry_confirms(100, flat)[0])     # 안 빠짐 → 차단
+        crash = make_ohlcv_df([100] * 19 + [103])     # +3% → 지수 -3% 급락 → 허용
+        mild = make_ohlcv_df([100] * 19 + [101.5])    # +1.5% → 지수 -1.5% 노이즈 → 차단(그 버그)
+        flat = make_ohlcv_df([100] * 20)              # 0% → 차단
+        self.assertTrue(b._inverse_entry_confirms(103, crash, "409820")[0])    # 나스닥 급락 → 허용
+        self.assertFalse(b._inverse_entry_confirms(101.5, mild, "409820")[0])  # 노이즈 → 차단
+        self.assertFalse(b._inverse_entry_confirms(100, flat, "409820")[0])    # 안 빠짐 → 차단
+        # 레버리지 정규화: -2X(252670)는 +3%도 함의 지수 -1.5%라 차단, +5%(-2.5%)여야 허용
+        self.assertFalse(b._inverse_entry_confirms(103, make_ohlcv_df([100] * 19 + [103]), "252670")[0])
+        self.assertTrue(b._inverse_entry_confirms(105, make_ohlcv_df([100] * 19 + [105]), "252670")[0])
 
     def test_inverse_entry_confirm_disabled_or_no_df(self):
-        """entry_min_rise_pct=0(비활성)이거나 df 부족이면 차단 안 함(기존 게이트 위임)."""
-        self.assertTrue(self._inv_helper_bot({"entry_min_rise_pct": 0})._inverse_entry_confirms(100, None)[0])
+        """entry_index_drop_pct=0(비활성)이거나 df 부족이면 차단 안 함(기존 게이트 위임)."""
+        self.assertTrue(self._inv_helper_bot({"entry_index_drop_pct": 0})._inverse_entry_confirms(100, None)[0])
         self.assertTrue(self._inv_helper_bot()._inverse_entry_confirms(100, None)[0])  # df None → 위임
 
     def test_inverse_reversal_lock_profit_only(self):

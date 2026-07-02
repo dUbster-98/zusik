@@ -754,6 +754,11 @@ BIAS_JSON={{"kr": {{"종목코드": "buy|hold|reduce|sell"}}, "us": {{"티커": 
             stats = self.tracker.get_monthly_stats(today.year, today.month)
             if stats.get("days", 0) == 0:
                 return
+            try:  # 진입 버킷 ROI — Discord 월간 리포트와 동일 축 (이 달 기준)
+                stats["entry_buckets"] = self.tracker.get_entry_bucket_stats(
+                    month=today.strftime("%Y-%m"))
+            except Exception:
+                pass
             from zusik.reporting.monthly_html import write_monthly_html
             from zusik import paths
             path = write_monthly_html(stats, paths.reports_path("monthly"),
@@ -797,6 +802,13 @@ BIAS_JSON={{"kr": {{"종목코드": "buy|hold|reduce|sell"}}, "us": {{"티커": 
             return
         if stats.get("days", 0) == 0:
             return
+        # 진입 버킷 ROI 상시 관측 — 월간 결산과 같은 기간(지난 달)으로 집계해
+        # 종목별/패턴별 손익과 원인 분석 축이 어긋나지 않게 한다
+        try:
+            stats["entry_buckets"] = self.tracker.get_entry_bucket_stats(
+                month=f"{prev_year}-{prev_month:02d}")
+        except Exception:
+            pass
 
         logger.info("월간 리포트: %s 수익률 %+.2f%% / drawdown %+.2f%%",
                     stats["month"], stats["return_pct"], stats["max_drawdown"])

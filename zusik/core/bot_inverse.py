@@ -245,20 +245,33 @@ class InverseHedgeMixin:
                 return reason
         return None
 
-    def _inverse_entry_confirms(self, price, df) -> "tuple[bool, float]":
-        """신규/증액 인버스 매수 확인 — 이 ETF가 장중 상승 중인가(=기초지수 하락 중)인가.
+    def _inverse_leverage(self, code) -> float:
+        """인버스 ETF 배율의 절대값. 메타 없으면 1.0. -1X→1.0, -2X→2.0, -3X→3.0."""
+        if not code:
+            return 1.0
+        from zusik.analysis.smart_signals import SmartSignals
+        meta = (SmartSignals.KR_INVERSE_ETF.get(str(code))
+                or SmartSignals.US_INVERSE_ETF.get(str(code)) or {})
+        return abs(float(meta.get("leverage", -1) or -1)) or 1.0
 
-        인버스는 기초지수가 내릴 때만 오른다. ETF '자기 등락률'로 '이 시장이 지금 빠지는지'를
-        직접 확인 → KOSPI만 빠질 때 코스닥/나스닥 인버스(251340/409820)까지 무차별 매수하는
-        걸 차단(지수/장시간 무관·스테일 면역). df 부족하면 차단 안 함(기존 게이트에 위임).
-        config: inverse.entry_min_rise_pct(기본 1.0%)."""
-        th = float((self.config.get("inverse", {}) or {}).get("entry_min_rise_pct", 1.0)) / 100.0
-        if th <= 0:
+    def _inverse_entry_confirms(self, price, df, code=None) -> "tuple[bool, float]":
+        """신규/증액 인버스 매수 확인 — 이 ETF의 상승이 '기초지수 급락'을 반영하는가.
+
+        인버스는 기초지수가 내릴 때만 오른다. ETF '자기 등락률'을 레버리지로 정규화해
+        '함의 지수 낙폭'을 구하고, 그게 급락 수준(기본 -2.5%, _fast_market_fall 지수 임계와
+        정합)일 때만 통과한다. 단순 +1% 상승은 지수 -1%(강세장 노이즈)라 통과 못 함 →
+        KOSPI만 빠질 때 나스닥/코스닥 인버스(409820/251340)까지 무차별 매수하던 손실 차단.
+        -2X는 +5%, -3X는 +7.5% 있어야 같은 -2.5% 급락으로 확인(레버리지 정규화).
+        df 부족하면 차단 안 함(기존 게이트에 위임).
+        config: inverse.entry_index_drop_pct(기본 2.5%)."""
+        idx_th = float((self.config.get("inverse", {}) or {}).get("entry_index_drop_pct", 2.5)) / 100.0
+        if idx_th <= 0:
             return True, 0.0
         chg = self._intraday_change(price, df)
         if chg is None:
             return True, 0.0       # 데이터 부족 — 기존 동작 보존(차단하지 않음)
-        return chg >= th, chg
+        implied_index_drop = chg / self._inverse_leverage(code)   # ETF +chg → 지수 -chg/lev
+        return implied_index_drop >= idx_th, chg
 
     def _inverse_net_rate(self, market: str, holding: "dict | None", cur_price: float = 0.0) -> float:
         """보유 인버스의 왕복 수수료 공제 순익률 (EOD/반전 락인 공용)."""
@@ -434,11 +447,11 @@ class InverseHedgeMixin:
             if held_qty > 0:
                 logger.info("인버스 보유 유지 %s: %s", name, reason)
             return
-        # 시장별 무차별 매수 차단: 이 인버스가 장중 상승(=기초지수 하락) 확인일 때만 매수.
-        # KOSPI만 빠질 때 코스닥/나스닥 인버스까지 한꺼번에 사는 손실 방지.
-        confirm, chg = self._inverse_entry_confirms(price, df)
+        # 시장별 무차별 매수 차단: 이 인버스의 상승이 '기초지수 급락' 수준일 때만 매수.
+        # KOSPI만 빠질 때 나스닥/코스닥 인버스까지 한꺼번에 사는 손실 방지(레버리지 정규화).
+        confirm, chg = self._inverse_entry_confirms(price, df, code)
         if not confirm:
-            logger.info("인버스 매수 보류 %s: 자기 등락 %+.2f%% — 이 시장은 지금 안 빠짐(무차별 매수 차단)",
+            logger.info("인버스 매수 보류 %s: 자기 등락 %+.2f%% — 함의 지수 낙폭이 급락 미달(무차별 매수 차단)",
                         name, chg * 100)
             return
         # 헷지 증액 시간 간격: 1차는 즉시(빠른 대응), 2차+는 직전 헷지 매수 후

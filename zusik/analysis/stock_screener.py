@@ -43,7 +43,7 @@ class StockScreener:
       - 위기: 급락/전쟁 감지 시 즉시 방어 종목으로 재선별
     """
 
-    def __init__(self, api_key: str = "", model: str = "claude-sonnet-4-20250514", config: dict | None = None):
+    def __init__(self, api_key: str = "", model: str = "claude-sonnet-5", config: dict | None = None):
         self._api_key = api_key
         self._has_api = bool(api_key)
         if api_key:

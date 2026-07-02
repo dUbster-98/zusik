@@ -150,9 +150,11 @@ class KRTradingMixin:
         long_term_reason = ""
         news_text = ""
 
-        # 소액계좌(20만원 미만): 현금 95% 전액 투입 (분할 의미 없음).
+        # 소액계좌(최소주문의 2배 이하): 현금 95% 전액 투입 (분할 의미 없음).
+        # 경계 포함(≤): 정확히 20만(=min_amount 10만×2) 계좌가 경계에서 탈락해 동적 스로틀에
+        # 막혀 매매 전면 정지되던 버그(사용자 2026-07-01). min_amount 기준이라 설정 변경에 자동 대응.
         # 인버스 헷지는 소액 올인 금지 — 테일헷지는 항상 분할 (max_ratio 한도 내).
-        small_account = cash < 200_000 and hedge_base_ratio is None
+        small_account = cash <= max(200_000, self.min_amount * 2) and hedge_base_ratio is None
 
         conf = 0.5
         analysis = None
@@ -172,6 +174,12 @@ class KRTradingMixin:
         else:
             base_ratio = self.invest_ratio
 
+        # 총자산 — 양 분기에서 참조(whitelist 하한 등)하므로 if 앞에서 정의(소액 분기 미정의 방지).
+        try:
+            total_asset = int(balance.get("cash", 0)) + int(balance.get("total_eval", 0))
+        except Exception:
+            total_asset = int(cash)
+
         if small_account:
             invest = int(cash * max(base_ratio, 0.95))
         else:
@@ -186,10 +194,6 @@ class KRTradingMixin:
                 realized_vol=rvol,
             )
             # cap을 자산 기준으로 환산: invest = total_asset × ratio (단 cash 한도 내)
-            try:
-                total_asset = int(balance.get("cash", 0)) + int(balance.get("total_eval", 0))
-            except Exception:
-                total_asset = int(balance.get("cash", 0))
             invest = int(total_asset * adj_ratio)
             invest = min(invest, int(cash))  # 가용 현금 한도
             if abs(adj_ratio - base_ratio) > 0.01:
@@ -266,7 +270,18 @@ class KRTradingMixin:
                 return
 
         if invest < self.min_amount:
-            return
+            # 중소 계좌 구제: 동적 스로틀이 invest 를 min_amount 밑으로 눌러도, 현금이 최소주문
+            # (또는 1주)을 감당하면 그만큼은 태운다. 스로틀은 대형계좌 리스크 제어인데 소액에선
+            # '주문 불가 → 매매 전면 정지'로 변질(20만~수십만 계좌가 14% 스로틀에 막힘).
+            # 인버스 헷지는 제외(테일헷지 분할 규율 유지 — max_ratio 캡이 담당).
+            if hedge_base_ratio is None and price > 0 and cash >= min(self.min_amount, price):
+                floored = min(int(cash), max(self.min_amount, price))
+                logger.info("%s 소액 구제: 스로틀 결과 %s < 최소주문 %s → %s로 상향(현금 %s)",
+                            name, f"{int(invest):,}", f"{self.min_amount:,}",
+                            f"{floored:,}", f"{int(cash):,}")
+                invest = floored
+            else:
+                return
         invest = min(invest, cash)
 
         # ── 분할 매수 (소액은 전량 1회) ──
@@ -306,6 +321,12 @@ class KRTradingMixin:
 
         if small_account:
             qty = invest // price if price > 0 else 0
+            if qty <= 0 and price > 0 and cash >= price:
+                # 95% 올인 밴드 갭: 주가가 (현금×0.95, 현금] 구간이면 invest//price=0으로
+                # 조용히 포기 → 후보가 적은 완전 소액 계좌에선 매매 정지와 동일. 1주는 태운다.
+                qty = 1
+                logger.info("%s 소액 1주 상향: invest %s < 주가 %s ≤ 현금 %s",
+                            name, f"{int(invest):,}", f"{price:,}", f"{int(cash):,}")
             if qty <= 0:
                 return
             tranche = 1
@@ -458,9 +479,13 @@ class KRTradingMixin:
                 indicators = analysis.get("indicators") if analysis else None
                 analyst_details = analysis.get("analyst_details") if analysis else None
 
+            # 수동 진입은 자동 전략의 산출물이 아니므로 별도 버킷으로 — 전략 EMA 오염 방지.
+            # (잔금소진/강제매수는 실측 +EV(leftover 45건 승률 69%)라 일반 학습 유지)
+            _entry_reason = self.tracker.get_last_buy_reason(code)
+            _strategy_bucket = "manual" if "수동" in _entry_reason else self.strategy.name
             self.reward.record_trade_result(
                 stock_code=code, stock_name=name,
-                strategy_name=self.strategy.name,
+                strategy_name=_strategy_bucket,
                 realized_pnl=pnl["realized_pnl"],
                 realized_rate=pnl["realized_rate"],
                 indicators=indicators,

@@ -470,7 +470,7 @@ class ClaudeAnalyst:
 
     ROLES = ["fundamental", "sentiment", "quant", "generalist"]
 
-    def __init__(self, api_key: str = "", model: str = "claude-sonnet-4-20250514",
+    def __init__(self, api_key: str = "", model: str = "claude-sonnet-5",
                  prefer_cli: bool = True, provider: str = "auto"):
         from zusik.clients.claude_client import ClaudeClient
         client = ClaudeClient(api_key=api_key, prefer_cli=prefer_cli, provider=provider)

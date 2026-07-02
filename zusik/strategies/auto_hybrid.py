@@ -24,7 +24,7 @@ class AutoHybridStrategy(Strategy):
     def __init__(
         self,
         api_key: str = "",
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-5",
         use_web_search: bool = True,
         prefer_cli: bool = True,
         backtest_days: int = 120,   #: 30→120 (get_daily_long 250봉 실사용, 모델선택 6개월 평가)
@@ -212,6 +212,15 @@ class AutoHybridStrategy(Strategy):
         except Exception:
             pass
 
+        # 백테스트 검증 점수 기반 확신도 — RSI 스텁만으로는 중립 RSI(30~70)에서 0.5 고정이라
+        # 장전 'cautious'(요구 0.55) 날에 로컬 전략 매수가 전면 정지되던 근본 원인
+        # (라이브 실측: 후보 전원 "확신도 50% < 요구 55%" 차단 → 거래 전면 포기).
+        # adaptive가 방금 선택에 쓴 전략의 검증 점수를 반영. 상향만(max) — 하향은 게이트
+        # 강화 부작용이 있어 미적용, 약세 edge는 어차피 기존 0.5 스텁과 동일하게 취급.
+        bt_conf = self._backtest_confidence()
+        if bt_conf is not None:
+            confidence = max(confidence, bt_conf)
+
         self._last_analysis = {
             "signal": signal,
             "confidence": confidence,
@@ -224,6 +233,31 @@ class AutoHybridStrategy(Strategy):
             "indicators": {},
         }
         return signal
+
+    def _backtest_confidence(self):
+        """adaptive 백테스트 종합 점수(수익+샤프+승률 합성) → 확신도.
+
+        승률 단독은 부적합 — 모멘텀 전략은 승률 40%대로 비대칭 수익을 내는 게 정상이라
+        (라이브: dual_momentum 승률 44%인데 평균수익 +40%, 점수 0.47) 승률 매핑이면
+        검증된 강한 edge도 cautious(0.55)를 못 넘는다. score 0.1→0.55, 0.3→0.65,
+        [0.40, 0.70] 클램프. 표본 부족(거래 <5)이면 None(스텁 유지).
+        글로벌 검증 전략이 있으면 그 점수, 없으면 종목별 백테스트 1등 점수.
+        """
+        a = self._adaptive
+        try:
+            if getattr(a, "_global_best", None) is not None and getattr(a, "_global_scores", None):
+                s = a._global_scores[0]
+                trades = int(s.get("trades_total", 0))
+            elif getattr(a, "_last_scores", None):
+                s = a._last_scores[0]
+                trades = int(s.get("trades", 0))
+            else:
+                return None
+            if trades < 5:
+                return None
+            return max(0.40, min(0.70, 0.5 + float(s.get("score", 0.0)) * 0.5))
+        except Exception:
+            return None
 
     def _analyze_claude(self, df: pd.DataFrame, level: str, volatility: float) -> str:
         if not self._claude_ready:

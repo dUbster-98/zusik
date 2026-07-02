@@ -769,6 +769,21 @@ class SelectionMixin:
                                 logger.info("잔금 소진: %s 주당 %s원 > 잔여 %s원, 스킵",
                                             sn, f"{s_price:,}", f"{remaining:,}")
                                 continue
+                            # 장전 게이트는 실제 매수 종목 기준으로 재평가 — 위 게이트는 원래
+                            # 종목(symbol=code) 기준이라 whitelist 우회가 대체 종목으로 새면 안 됨
+                            allow_alt, alt_pm = self._pre_market_buy_gate("KR", conf2, symbol=sc)
+                            if not allow_alt:
+                                logger.info("잔금 소진 %s 스킵: %s", sn, alt_pm)
+                                continue
+                            # 재진입 차단/일일 매도 한도 — US 잔여 소진과 동일한 churn 가드
+                            alt_blocked, alt_br = self._is_reentry_blocked(sc, s_price)
+                            if alt_blocked:
+                                logger.info("잔금 소진 %s 스킵: %s", sn, alt_br)
+                                continue
+                            alt_limited, _al = self._is_daily_sell_limit(sc)
+                            if alt_limited:
+                                logger.info("잔금 소진 %s 스킵: 일일 매도 한도 도달", sn)
+                                continue
                             # 모멘텀 가드: 약세/출혈 종목은 잔금 소진 후보에서 제외
                             s_df = self.client.get_ohlcv(sc)
                             if s_df is None or s_df.empty:
@@ -785,6 +800,8 @@ class SelectionMixin:
                                         sn, s_qty, f"{s_price:,}", mom)
                             result = self.client.buy_market(sc, s_qty)
                             if result.get("success"):
+                                # 포지션 상태 기록 — 없으면 본전보호/트레일링이 이 보유를 모름
+                                self.positions.record_buy(sc, sn, s_qty, s_price)
                                 self.tracker.record_buy(sc, sn, s_qty, s_price, False, "잔금 소진 매수")
                                 logger.info("잔금 소진 매수 성공: %s %d주", sn, s_qty)
                             else:

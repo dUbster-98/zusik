@@ -133,6 +133,27 @@ def render_monthly_html(stats: dict, generated_at: str = "") -> str:
                        '<th style="text-align:right">총 손익</th></tr>\n'
                        f'{prows}\n    </table>')
 
+    # 진입 유형별 손익 (이 달) — leftover/force_buy 등이 음수 전환하는지 관측
+    _entry_label = {"normal": "일반", "leftover": "잔금소진", "force_buy": "강제매수",
+                    "idle_cash": "유휴진입", "manual": "수동", "unknown": "미상"}
+    ebuckets = stats.get("entry_buckets") or {}
+    erows = "\n".join(
+        f'      <tr><td>{_html.escape(_entry_label.get(b, b))}</td>'
+        f'<td style="text-align:right">{s.get("n", 0)}</td>'
+        f'<td style="text-align:right">'
+        f'{(s.get("wins", 0) / s["n"] * 100) if s.get("n") else 0:.0f}%</td>'
+        f'<td style="color:{_color(s.get("pnl", 0))};text-align:right">'
+        f'{_won_signed(s.get("pnl", 0))}</td></tr>'
+        for b, s in sorted(ebuckets.items(), key=lambda x: -x[1].get("n", 0))
+        if s.get("n", 0) > 0
+    )
+    entry_section = ("" if not erows else
+                     '\n    <h2>진입 유형별 손익</h2>\n    <table>\n'
+                     '      <tr><th>진입</th><th style="text-align:right">건수</th>'
+                     '<th style="text-align:right">승률</th>'
+                     '<th style="text-align:right">총 손익</th></tr>\n'
+                     f'{erows}\n    </table>')
+
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -185,6 +206,7 @@ def render_monthly_html(stats: dict, generated_at: str = "") -> str:
     </div>
 {stock_section}
 {pattern_section}
+{entry_section}
     <div class="foot">
       zusik 자동매매 · 월간 요약 · {_html.escape(basis_label)}
       {gen_html}

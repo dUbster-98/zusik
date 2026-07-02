@@ -29,7 +29,7 @@ class ClaudeStrategy(Strategy):
     def __init__(
         self,
         api_key: str = "",
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-5",
         use_web_search: bool = True,
         min_confidence: float = 0.6,
         prefer_cli: bool = True,

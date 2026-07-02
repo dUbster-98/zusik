@@ -692,6 +692,12 @@ class USTradingMixin:
                         at = alt["ticker"]
                         if at == ticker:
                             continue
+                        # 장전 게이트는 실제 매수 종목 기준으로 재평가 — 바깥 게이트는 원래
+                        # 종목(symbol=ticker) 기준이라 whitelist 우회가 대체 종목으로 새면 안 됨
+                        allow_alt, alt_pm = self._pre_market_buy_gate("US", conf, symbol=at)
+                        if not allow_alt:
+                            logger.debug("US 잔여 소진 후보 %s 제외: %s", at, alt_pm)
+                            continue
                         # 재진입 차단된 종목은 잔여 소진 후보에서도 제외
                         alt_blocked, alt_br = self._is_reentry_blocked(at)
                         if alt_blocked:
@@ -872,8 +878,10 @@ class USTradingMixin:
         reason = ""
         long_term_reason = ""
 
-        # 인버스 헷지는 소액 올인 금지 — 항상 분할 (max_ratio 한도 내)
-        small_usd = cash_usd < 500 and hedge_base_ratio is None
+        # 소액계좌(최소주문의 2배 이하): 올인. 경계 포함(≤)·min_amount 기준 — KR과 동일.
+        # 정확히 $500(=min $50×2 기본은 아니나 하한 $500 유지) 계좌가 경계 탈락해 스로틀에
+        # 막혀 매매 정지되던 버그(KR 20만 계좌와 같은 클래스). 인버스 헷지는 올인 금지.
+        small_usd = cash_usd <= max(500, self.min_amount_usd * 2) and hedge_base_ratio is None
         conf = 0.5
         analysis = None
         if hedge_base_ratio is not None:
@@ -939,10 +947,24 @@ class USTradingMixin:
             invest = _wl_floor_usd
 
         if invest < self.min_amount_usd:
-            return
+            # 중소 계좌 구제 (KR과 동일): 스로틀이 min 밑으로 눌러도 현금이 최소주문/1주를
+            # 감당하면 최소주문만큼 태운다. 소액에서 '주문불가 → 매매정지' 변질 방지. 인버스 제외.
+            if hedge_base_ratio is None and price > 0 and cash_usd >= min(self.min_amount_usd, price):
+                floored = min(cash_usd, max(self.min_amount_usd, price))
+                logger.info("US %s 소액 구제: 스로틀 $%.2f < 최소 $%.0f → $%.2f로 상향(현금 $%.2f)",
+                            name, invest, self.min_amount_usd, floored, cash_usd)
+                invest = floored
+            else:
+                return
 
         invest = min(invest, cash_usd)
         qty = int(invest / price) if price > 0 else 0
+        if qty <= 0 and small_usd and price > 0 and cash_usd >= price * 1.005:
+            # 95% 올인 밴드 갭 (KR과 동일): 주가가 (현금×0.95, 현금] 구간이면 0주 포기 → 1주 태움.
+            # 1.005 = 지정가 버퍼(아래 buy_us_limit price*1.005)까지 현금이 감당해야 주문 통과.
+            qty = 1
+            logger.info("US %s 소액 1주 상향: invest $%.2f < 주가 $%.2f ≤ 현금 $%.2f",
+                        name, invest, price, cash_usd)
         if qty <= 0:
             return
 
@@ -1029,9 +1051,12 @@ class USTradingMixin:
             pnl = self.tracker.record_sell(ticker, name, qty, price_krw, avg_krw, reason)
             self._record_sell_for_churn_guard(ticker, reason, sell_price=price)  # USD 기준 (재매수 비교도 USD)
 
+            # 수동 진입은 자동 전략 학습에서 분리 (KR과 동일 — bot_kr._handle_sell 참조)
+            _entry_reason = self.tracker.get_last_buy_reason(ticker)
+            _strategy_bucket = "manual" if "수동" in _entry_reason else self.strategy.name
             self.reward.record_trade_result(
                 stock_code=ticker, stock_name=name,
-                strategy_name=self.strategy.name,
+                strategy_name=_strategy_bucket,
                 realized_pnl=pnl["realized_pnl"],
                 realized_rate=pnl["realized_rate"],
                 context=self._build_reward_context(
@@ -1247,20 +1272,35 @@ class USTradingMixin:
                     buy_candidates.sort(key=lambda x: x["confidence"], reverse=True)
                     us_candidates = buy_candidates
                 else:
-                    # 전부 SELL → 신호 존중, 현금 대기
+                    # 전부 SELL → 신호 존중, 현금 대기. ("3시간 유휴 시 최약 SELL 소량 진입"
+                    # 분기는 리스트를 비운 뒤 빈 리스트를 정렬하던 죽은 코드라 삭제 —
+                    # 실행 이력 0이었고, 전 종목 매도신호인 날의 진입은 신호 존중과 모순)
                     us_candidates = []
-                    idle = self._cash_idle_hours()
-                    if idle >= 3:
-                        us_candidates.sort(key=lambda x: x["confidence"])
-                        us_candidates = us_candidates[:1]
-                        logger.info("US 전 종목 SELL + %d시간 유휴 → 최약 SELL %s 소량 진입",
-                                    idle, us_candidates[0]["name"] if us_candidates else "없음")
-                    else:
-                        us_candidates = []
-                        logger.info("US 전 종목 SELL → 현금 대기 (%d시간 유휴)", idle)
+                    logger.info("US 전 종목 SELL → 현금 대기 (%d시간 유휴)", self._cash_idle_hours())
                 logger.info("US 후보: %s", [(c["name"], c["signal"], f"{c['confidence']:.0%}") for c in us_candidates])
                 remaining_usd = buying_power
                 for uc in us_candidates:
+                    # 강제매수도 신규 매수 — 장전 리스크오프(avoid_new_buy 등)·재진입 차단을
+                    # 존중한다. "보유 0 회피"가 방어적 현금 결정을 뒤집으면 안 됨.
+                    allow_pm, pm_reason = self._pre_market_buy_gate(
+                        "US", uc.get("confidence", 0), symbol=uc["ticker"])
+                    if not allow_pm:
+                        logger.info("US 강제매수 차단 (%s): %s", uc["name"], pm_reason)
+                        continue
+                    fb_blocked, fb_br = self._is_reentry_blocked(uc["ticker"], uc["price"])
+                    if fb_blocked:
+                        logger.info("US 강제매수 차단 (%s): %s", uc["name"], fb_br)
+                        continue
+                    # 보수/쿨다운 국면엔 유휴 현금 해소보다 현금 유지 — 일반 매수 경로와 동일 기준
+                    fb_conf = uc.get("confidence", 0)
+                    if getattr(self, "_defensive_mode", False) and fb_conf < 0.70:
+                        logger.info("US 강제매수 보류 (%s): defensive 확신도 %.0f%% < 70%%",
+                                    uc["name"], fb_conf * 100)
+                        continue
+                    if getattr(self, "_daily_target_cooldown", False) and fb_conf < self.daily_target_min_confidence:
+                        logger.info("US 강제매수 보류 (%s): 일일 목표 쿨다운 확신도 %.0f%% < %.0f%%",
+                                    uc["name"], fb_conf * 100, self.daily_target_min_confidence * 100)
+                        continue
                     qty = int(remaining_usd / uc["price"])
                     if qty >= 1:
                         result = self.client.buy_us_limit(uc["ticker"], qty, uc["price"] * 1.005, uc["exchange"])
@@ -1269,6 +1309,8 @@ class USTradingMixin:
                             remaining_usd -= qty * uc["price"]
                             force_bought_tickers.add(uc["ticker"])
                             fx_now = self.client.get_usd_krw_rate()
+                            # 포지션 상태 기록 — 없으면 이후 본전보호/트레일링/피라미딩이 이 보유를 모름
+                            self.positions.record_buy(uc["ticker"], uc["name"], qty, uc["price"])
                             self.tracker.record_buy(uc["ticker"], uc["name"], qty, int(uc["price"] * fx_now), False,
                                                     f"US 강제매수 확신도 {uc['confidence']:.0%}")
                             from zusik.clients.discord_bot import send_trade_alert

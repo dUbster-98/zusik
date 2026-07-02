@@ -591,9 +591,10 @@ class ClaudeClient:
     # alias → 200k context 풀 모델명 매핑.
     # 'opus' alias는 사용자 환경에 따라 'claude-opus-4-7[1m]'으로 해석돼
     # "Usage credits required for 1M context" 오류를 일으킬 수 있음 → 200k 버전 명시.
+    # sonnet: Sonnet 5 (claude-sonnet-5, 라이브 검증 2026-07-01). 날짜 접미사 ID는 미존재.
     _MODEL_FULL = {
         "opus":   "claude-opus-4-7",
-        "sonnet": "claude-sonnet-4-6",
+        "sonnet": "claude-sonnet-5",
         "haiku":  "claude-haiku-4-5-20251001",
     }
 

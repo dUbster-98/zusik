@@ -17,16 +17,28 @@ from zusik.clients.discord_commander import DiscordCommander
 logger = logging.getLogger(__name__)
 
 # 봇 소유자 Discord ID — .env에 DISCORD_OWNER_ID 설정 필수
-_OWNER_ID = int(os.getenv("DISCORD_OWNER_ID", "0"))
+def _parse_owner_id(raw) -> int:
+    """빈 값('')·비숫자면 0 — .env.example 그대로 복사해도 import 크래시 없이 fail-closed."""
+    try:
+        return int(raw or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
+_OWNER_ID = _parse_owner_id(os.getenv("DISCORD_OWNER_ID"))
 
 _discord_bot_ref = None  # 전역 봇 참조 (알림용)
 
 
 def _is_owner(interaction: discord.Interaction) -> bool:
-    """명령 실행자가 봇 소유자인지 확인."""
+    """명령 실행자가 봇 소유자인지 확인.
+
+    OWNER_ID 미설정이면 거부(fail-closed). 이전의 '서버 관리자 폴백'은 관리자
+    계정 탈취 = 원격 매매·업데이트 권한이라 제거 — 매매 명령을 쓰려면
+    DISCORD_OWNER_ID 를 명시해야 한다. 알림(webhook)은 권한과 무관하게 동작.
+    """
     if _OWNER_ID == 0:
-        # OWNER_ID 미설정 시 서버 관리자만 허용
-        return interaction.user.guild_permissions.administrator
+        return False
     return interaction.user.id == _OWNER_ID
 
 
@@ -360,6 +372,11 @@ def start_discord_bot(trading_bot, token: str = ""):
         app_commands.Choice(name="US (미국)", value="US"),
     ])
     async def cmd_pre_report(interaction: discord.Interaction, market: str):
+        # 읽기 명령처럼 보이지만 당일 sentiment 파일을 갱신해 매수 게이트를 바꾸는
+        # 상태 변경 명령(force=True) — 소유자 전용. LLM/웹검색 강제 호출 비용도 있음.
+        if not _is_owner(interaction):
+            await interaction.response.send_message("권한 없음 (소유자만 가능)", ephemeral=True)
+            return
         await interaction.response.send_message(
             f"**{market} 장전 분석 강제 실행** (Claude 호출 ~1분 소요)"
         )

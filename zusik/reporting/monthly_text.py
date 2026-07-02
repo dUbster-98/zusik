@@ -36,6 +36,21 @@ def _fmt_rows(rows) -> str:
         for g in rows)
 
 
+def _entry_bucket_lines(stats: dict) -> str:
+    """진입 버킷별 ROI 요약 — leftover/force_buy 등이 음수 전환하는지 상시 관측."""
+    buckets = stats.get("entry_buckets") or {}
+    if not buckets:
+        return ""
+    rows = []
+    for b, s in sorted(buckets.items(), key=lambda x: -x[1].get("n", 0)):
+        n = s.get("n", 0)
+        if n <= 0:
+            continue
+        rows.append(f"· {b}: {n}건 승률 {s.get('wins', 0) / n * 100:.0f}% "
+                    f"{int(s.get('pnl', 0)):+,}원")
+    return "\n".join(rows)
+
+
 def format_monthly_report(stats: dict, period_label: str = "지난 달") -> str:
     """월간 성과 상세 텍스트(멀티메신저/bot 공용). stats 가 비면 빈 문자열.
 
@@ -59,6 +74,9 @@ def format_monthly_report(stats: dict, period_label: str = "지난 달") -> str:
         lines.append("\n수익 종목 TOP\n" + _fmt_rows(winners))
     if losers:
         lines.append("\n손실 종목\n" + _fmt_rows(losers))
+    eb = _entry_bucket_lines(stats)
+    if eb:
+        lines.append(f"\n진입 유형별 ({month or '해당 월'})\n" + eb)
     return "\n".join(lines)
 
 
@@ -82,4 +100,8 @@ def monthly_embed_fields(stats: dict) -> list:
         fields.append({"name": "수익 종목 TOP", "value": _fmt_rows(winners), "inline": False})
     if losers:
         fields.append({"name": "손실 종목", "value": _fmt_rows(losers), "inline": False})
+    eb = _entry_bucket_lines(stats)
+    if eb:
+        fields.append({"name": f"진입 유형별 ({stats.get('month', '') or '해당 월'})",
+                       "value": eb, "inline": False})
     return fields

@@ -382,6 +382,9 @@ class DiscordCommander:
                 return f"금액 부족: {amount:,}원으로 {price:,}원 종목 매수 불가"
             result = self.bot.client.buy_market(code, qty)
             if result.get("success"):
+                # 수동 주문도 봇 회계에 기록 — 없으면 포지션 보호(본전/트레일링)와
+                # 실현손익·패턴 통계가 이 보유를 모르거나 추정치로 어긋남
+                self._record_manual_buy(code, name, qty, price)
                 self._send_alert("buy", name, code, qty, f"{price:,}원")
             return f"매수 주문: {name} {qty}주 ({amount:,}원)\n결과: {result.get('message', 'OK')}"
         elif market == "US":
@@ -397,9 +400,35 @@ class DiscordCommander:
             buy_price = round(price * 1.005, 2)
             result = self.bot.client.buy_us_limit(code, qty, buy_price, "NASD")
             if result.get("success"):
+                fx = self.bot.client.get_usd_krw_rate()
+                self._record_manual_buy(code, name, qty, buy_price, price_krw=int(buy_price * fx))
                 self._send_alert("buy", name, code, qty, f"${buy_price}")
             return f"매수 주문: {name} {qty}주 @ ${buy_price}\n결과: {result.get('message', 'OK')}"
         return "사용법: /매수 KR 005930 50000  또는  /매수 US SOFI"
+
+    def _record_manual_buy(self, code: str, name: str, qty: int, price, price_krw: int = 0):
+        """수동 매수를 tracker/positions 에 기록 — 실패해도 주문 결과 보고는 막지 않음."""
+        try:
+            self.bot.positions.record_buy(code, name, qty, price)
+        except Exception:
+            logger.debug("수동 매수 포지션 기록 실패: %s", code, exc_info=True)
+        try:
+            self.bot.tracker.record_buy(code, name, qty, int(price_krw or price), False, "수동 명령")
+        except Exception:
+            logger.debug("수동 매수 tracker 기록 실패: %s", code, exc_info=True)
+
+    def _record_manual_sell(self, code: str, name: str, qty: int, sell_price, avg_price,
+                            sell_krw: int = 0, avg_krw: int = 0):
+        """수동 매도를 tracker/positions 에 기록 — 스냅샷 추정 대신 실제 체결가 기준 P&L."""
+        try:
+            self.bot.tracker.record_sell(code, name, qty, int(sell_krw or sell_price),
+                                         int(avg_krw or avg_price), "수동 명령")
+        except Exception:
+            logger.debug("수동 매도 tracker 기록 실패: %s", code, exc_info=True)
+        try:
+            self.bot.positions.record_sell(code, qty)
+        except Exception:
+            logger.debug("수동 매도 포지션 기록 실패: %s", code, exc_info=True)
 
     def _send_alert(self, side: str, name: str, code: str, qty: int, price_str: str):
         """Discord 채널에 매매 알림."""
@@ -434,6 +463,8 @@ class DiscordCommander:
             name = holding.get("name", code)
             result = self.bot.client.sell_market(code, holding["qty"])
             if result.get("success"):
+                self._record_manual_sell(code, name, holding["qty"],
+                                         holding["current_price"], holding.get("avg_price", 0))
                 self._send_alert("sell", name, code, holding["qty"], f"{holding['current_price']:,}원")
             return f"매도: {name} {holding['qty']}주\n결과: {result.get('message', 'OK')}"
         elif market == "US":
@@ -444,6 +475,10 @@ class DiscordCommander:
             name = holding.get("name", code)
             result = self.bot.client.sell_us_limit(code, holding["qty"], holding["current_price"] * 0.995, "NASD")
             if result.get("success"):
+                fx = self.bot.client.get_usd_krw_rate()
+                cur, avg = holding["current_price"], holding.get("avg_price", 0)
+                self._record_manual_sell(code, name, holding["qty"], cur, avg,
+                                         sell_krw=int(cur * fx), avg_krw=int(avg * fx))
                 self._send_alert("sell", name, code, holding["qty"], f"${holding['current_price']:.2f}")
             return f"매도: {name} {holding['qty']}주\n결과: {result.get('message', 'OK')}"
         return "사용법: /매도 KR 005930  또는  /매도 US SOFI"
@@ -476,8 +511,13 @@ class DiscordCommander:
             pull = subprocess.run(["git", "pull"], capture_output=True, text=True, timeout=30)
             if pull.returncode != 0:
                 return f"git pull 실패:\n{(pull.stderr or pull.stdout)[:400]}"
-            subprocess.run(["sudo", "systemctl", "restart", "zusik"],
-                           capture_output=True, text=True, timeout=10)
+            # 재시작이 성공하면 이 프로세스가 죽어 아래 성공 메시지는 전달 못 할 수 있음(정상).
+            # 성공 확인은 워치독/기동 알림 담당 — 여기선 실패(sudo 거부 등)만 정확히 보고.
+            rst = subprocess.run(["sudo", "systemctl", "restart", "zusik"],
+                                 capture_output=True, text=True, timeout=10)
+            if rst.returncode != 0:
+                return (f"git pull 성공, 재시작 실패(rc={rst.returncode}) — 구버전이 계속 실행 중!\n"
+                        f"{(rst.stderr or rst.stdout)[:300]}")
             return f"업데이트 적용 + 재시작\n{pull.stdout[:400]}"
         except Exception as e:
             return f"업데이트 실패: {e}"
