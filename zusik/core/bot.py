@@ -377,7 +377,10 @@ class TradingBot(
         self._post_market_notified: str = ""
         self._us_pre_notified: str = ""
         self._us_post_notified: str = ""
-        self._daily_loss_halted: str = ""
+        # 손실한도 중단은 시장별 — US 새벽 손실이 같은 날짜의 KR장까지 막지 않게.
+        # {market_key("KR"|"US"|"ALL"): "YYYY-MM-DD"}. released는 운영자 해제(당일 재발동 방지)
+        self._daily_loss_halted: dict = {}
+        self._daily_loss_released: dict = {}
         self._daily_target_reached: str = ""
         self._daily_target_cooldown: bool = False
         self._merge_logged_kr: set[str] = set()
@@ -477,7 +480,8 @@ class TradingBot(
         if getattr(self, "_last_daily_reset", "") != today:
             self._pre_market_notified = ""
             self._post_market_notified = ""
-            self._daily_loss_halted = ""
+            self._daily_loss_halted = {}
+            self._daily_loss_released = {}
             self._daily_target_reached = ""
             self._daily_target_cooldown = False
             self._merge_logged_kr.clear()

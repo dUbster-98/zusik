@@ -537,7 +537,7 @@ class KRTradingMixin:
             self._kr_running = False
 
     def _run_kr_inner(self):
-        if not self._check_risks_before_trading():
+        if not self._check_risks_before_trading("KR"):
             logger.warning("리스크 체크 실패 — KR 매매 중단")
             return
         if not self.kr_stocks:

@@ -31,12 +31,13 @@ if git rev-parse -q --verify "refs/tags/$VER" >/dev/null; then
   exit 1
 fi
 
-# 현재 트리를 main(릴리스 라인) 위 새 커밋으로 — 작업트리 미변경
+# 현재 트리를 release-main(공개 릴리스 라인) 위 새 커밋으로 — 작업트리 미변경.
+# 로컬 main 은 dev 기본 브랜치(hwirys)가 됐으므로 공개 라인은 release-main 으로 분리.
 TREE="$(git rev-parse HEAD^{tree})"
 NEW="$(GIT_AUTHOR_NAME=$PUB_AUTHOR  GIT_AUTHOR_EMAIL=$PUB_EMAIL \
        GIT_COMMITTER_NAME=$PUB_AUTHOR GIT_COMMITTER_EMAIL=$PUB_EMAIL \
-       git commit-tree "$TREE" -p main -m "$MSG")"
-git update-ref refs/heads/main "$NEW"
+       git commit-tree "$TREE" -p release-main -m "$MSG")"
+git update-ref refs/heads/release-main "$NEW"
 git tag "$VER" "$NEW"   # 이미 있으면 실패 → 같은 버전 덮어쓰기 방지
 
 # 공개 계정으로 전환해 푸시 + GitHub 릴리스.
@@ -44,7 +45,7 @@ git tag "$VER" "$NEW"   # 이미 있으면 실패 → 같은 버전 덮어쓰기
 # 셸이 zusik-py 로 남아 이후 gh 명령이 엉뚱한 계정으로 나갔다.
 gh auth switch -u "$PUB_ACCT" >/dev/null
 trap 'gh auth switch -u "$DEV_ACCT" >/dev/null || true' EXIT
-git push release main
+git push release release-main:main
 git push release "$VER"
 NOTES="$(awk -v v="${VER#v}" '
   $0 ~ ("^## \\[" v "\\]") {f=1; next}

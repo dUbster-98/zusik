@@ -1192,7 +1192,7 @@ class USTradingMixin:
             self._us_running = False
 
     def _run_us_inner(self):
-        if not self._check_risks_before_trading():
+        if not self._check_risks_before_trading("US"):
             return
         if not self.us_stocks:
             return

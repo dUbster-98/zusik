@@ -125,6 +125,8 @@ class DiscordCommander:
                 return self._handle_emergency_hold()
             elif action == "홀딩해제":
                 return self._handle_emergency_release()
+            elif action == "손실해제":
+                return self._handle_loss_release()
             elif action == "성과" or action == "수익":
                 return self._handle_performance()
             elif action == "헬스" or action == "health":
@@ -502,6 +504,25 @@ class DiscordCommander:
         self.bot.risk.deactivate_emergency_hold()
         return "긴급 홀딩 해제 — 매매 재개"
 
+    def _handle_loss_release(self) -> str:
+        """일일 손실한도 매매 중단 해제 — 해제한 시장은 오늘 재발동하지 않는다.
+
+        재발동 방지가 없으면 다음 사이클에 같은 손실로 즉시 재중단돼 명령이 무의미.
+        하드스톱/긴급홀딩/드로우다운 가드는 이 해제와 무관하게 유지된다."""
+        import datetime as _dt
+        today = _dt.datetime.now().strftime("%Y-%m-%d")
+        halted = dict(getattr(self.bot, "_daily_loss_halted", {}) or {})
+        active = [m for m, d in halted.items() if d == today]
+        released = active if active else ["ALL", "KR", "US"]  # 중단 전 선제 해제도 허용
+        for m in released:
+            self.bot._daily_loss_released[m] = today
+            self.bot._daily_loss_halted.pop(m, None)
+        scope = ", ".join(released)
+        state = "중단 상태였던" if active else "선제 해제 —"
+        return (f"일일 손실한도 해제 ({state} {scope})\n"
+                f"오늘 남은 시간 동안 해당 시장의 손실한도 중단은 재발동하지 않습니다.\n"
+                f"종목 하드스톱·긴급홀딩·드로우다운 가드는 그대로 유지됩니다.")
+
     # ── 업데이트 반영 ──
 
     def _handle_update(self) -> str:
@@ -628,6 +649,7 @@ class DiscordCommander:
 **운영·제어**
 /모드 aggressive — 트레이딩 모드 변경
 /긴급홀딩 — 매매 즉시 중단 · /홀딩해제 — 재개
+/손실해제 — 일일 손실한도 매매 중단 해제 (오늘 재발동 안 함)
 /업데이트 — 최신 버전으로 업데이트(git pull + 재시작)
 
 **진단**

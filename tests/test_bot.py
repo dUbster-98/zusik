@@ -251,9 +251,10 @@ class FakeTracker:
         })
         return {"realized_pnl": realized_pnl, "realized_rate": realized_rate}
 
-    def get_realized_pnl_today(self):
+    def get_realized_pnl_today(self, market=""):
         today = datetime.now().strftime("%Y-%m-%d")
-        sells = [t for t in self._trades if t["type"] == "sell" and t["date"] == today]
+        sells = [t for t in self._trades if t["type"] == "sell" and t["date"] == today
+                 and (not market or t.get("market") == market)]
         return {
             "date": today,
             "realized_pnl": sum(t.get("realized_pnl", 0) for t in sells),
@@ -1137,7 +1138,8 @@ class TradingBotScenarioTests(unittest.TestCase):
         bot._active_mode = "balanced"
         bot._prev_cash = 0
         bot._buy_blocked_low_cash = False
-        bot._daily_loss_halted = ""
+        bot._daily_loss_halted = {}
+        bot._daily_loss_released = {}
         bot._daily_target_reached = ""
         bot._daily_target_cooldown = False
         bot._reentry_block = {}
@@ -1539,6 +1541,28 @@ class TradingBotScenarioTests(unittest.TestCase):
         _code, qty, _price = self.client.buy_market_calls[-1]
         self.assertEqual(qty, 1, "300k 현금에서 쿨다운 25%면 1주만 매수되어야 함")
 
+    def test_virtual_account_rate_limited_to_one_call_per_sec(self):
+        """모의투자는 KIS가 초당 1건만 허용 — 성숙 계정(KIS_API_MATURE)이어도
+        is_virtual이면 호출 간격이 1초 이상 벌어져야 한다. 실전은 그대로 빠르게."""
+        import time as _time
+        from zusik.clients.kis_client import KISClient
+
+        def _two_calls_elapsed(virtual: bool) -> float:
+            c = KISClient.__new__(KISClient)
+            c.is_virtual = virtual
+            c._api_start_date = datetime.min  # 성숙 계정 (실전이면 12 req/sec)
+            c._call_times = []
+            c._order_call_times = []
+            t0 = _time.time()
+            c._rate_limit()
+            c._rate_limit()
+            return _time.time() - t0
+
+        self.assertGreaterEqual(_two_calls_elapsed(True), 1.0,
+                                "모의투자가 초당 1건 한도를 초과해 호출함")
+        self.assertLess(_two_calls_elapsed(False), 0.5,
+                        "실전 계정이 모의투자 스로틀에 걸림")
+
     def test_scenario_daily_loss_limit_halts_trading(self):
         """일일 손실이 한도(총자산 × 15%) 초과 시 매매 중단."""
         # FakeKIS cash=300_000 → daily_loss_limit = -45_000
@@ -1550,7 +1574,39 @@ class TradingBotScenarioTests(unittest.TestCase):
             can_trade = self.bot._check_risks_before_trading()
 
         self.assertFalse(can_trade, "일일 손실한도 도달 시 매매 중단되어야 함")
-        self.assertEqual(self.bot._daily_loss_halted, datetime.now().strftime("%Y-%m-%d"))
+        self.assertEqual(self.bot._daily_loss_halted.get("ALL"),
+                         datetime.now().strftime("%Y-%m-%d"))
+
+    def test_scenario_daily_loss_halt_is_per_market_and_releasable(self):
+        """회귀: US 새벽 손실이 같은 날짜의 KR장 전체를 막던 문제.
+
+        (a) US 시장 손실 한도 초과 → US만 중단, KR은 매매 지속.
+        (b) /손실해제 → 중단 해제 + 같은 날 재발동 없음 (해제가 없으면 다음
+            사이클에 같은 손실로 즉시 재중단돼 명령이 무의미)."""
+        # US 매도 대손실 (AAPL → market="US" 자동 분류), KR 손실 없음
+        self.tracker.record_sell("AAPL", "Apple", 10, 40_000, 50_000, "US big loss")
+
+        patches = dict(
+            a=patch("zusik.core.trading_mode.check_mode_change", return_value=None),
+            b=patch("zusik.core.trading_mode.check_deposit", return_value=None),
+            c=patch("zusik.core.trading_mode.detect_market_condition", return_value="peace"),
+        )
+        with patches["a"], patches["b"], patches["c"]:
+            self.assertFalse(self.bot._check_risks_before_trading("US"),
+                             "US 손실 한도 초과인데 US 매매가 계속됨")
+            self.assertTrue(self.bot._check_risks_before_trading("KR"),
+                            "US 손실이 KR장까지 중단시킴 — 시장 분리 실패")
+
+            # (b) 손실해제 명령 → US 재개 + 당일 재발동 방지
+            from zusik.clients.discord_commander import DiscordCommander
+            cmd = DiscordCommander.__new__(DiscordCommander)
+            cmd.bot = self.bot
+            msg = cmd._handle_loss_release()
+            self.assertIn("US", msg)
+            self.assertTrue(self.bot._check_risks_before_trading("US"),
+                            "손실해제 후에도 US가 중단 상태")
+            self.assertTrue(self.bot._check_risks_before_trading("US"),
+                            "손실해제 당일에 손실한도가 재발동됨")
 
     def test_scenario_sell_deferred_when_net_profit_too_small(self):
         """수수료 공제 후 순이익 < +0.30%면 매도 연기 (`_should_defer_sell`)."""

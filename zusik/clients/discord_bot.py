@@ -300,7 +300,7 @@ def start_discord_bot(trading_bot, token: str = ""):
     # ── 슬래시 명령 등록 ──
 
     # 소유자 전용 명령 (매매/모드/긴급 등)
-    _OWNER_ONLY_CMDS = {"매수", "매도", "모드", "긴급홀딩", "홀딩해제", "종목"}
+    _OWNER_ONLY_CMDS = {"매수", "매도", "모드", "긴급홀딩", "홀딩해제", "손실해제", "종목"}
 
     async def _run_and_reply(interaction: discord.Interaction, cmd: str):
         """모든 명령을 defer → 백그라운드 → followup 패턴으로."""
@@ -400,6 +400,10 @@ def start_discord_bot(trading_bot, token: str = ""):
     @bot.tree.command(name="홀딩해제", description="매매 재개")
     async def cmd_release(interaction: discord.Interaction):
         await _run_and_reply(interaction, "홀딩해제")
+
+    @bot.tree.command(name="손실해제", description="일일 손실한도 매매 중단 해제 (오늘 해당 시장 재발동 안 함)")
+    async def cmd_loss_release(interaction: discord.Interaction):
+        await _run_and_reply(interaction, "손실해제")
 
     @bot.tree.command(name="분석", description="종목 분석 결과 상세 보기")
     @app_commands.describe(code="종목코드 (예: 005930, SOFI)")

@@ -698,10 +698,11 @@ class PortfolioTracker:
 
     # ── 실현손익 조회 ──
 
-    def get_realized_pnl_today(self) -> dict:
-        """오늘 실현손익 합계."""
+    def get_realized_pnl_today(self, market: str = "") -> dict:
+        """오늘 실현손익 합계. market="KR"|"US"면 해당 시장 매도만 (손실한도 시장 분리용)."""
         today = datetime.now().strftime("%Y-%m-%d")
-        sells = [t for t in self._trades if t["type"] == "sell" and t["date"] == today]
+        sells = [t for t in self._trades if t["type"] == "sell" and t["date"] == today
+                 and (not market or t.get("market") == market)]
 
         total_pnl = sum(t.get("realized_pnl", 0) for t in sells)
         total_sell_amount = sum(t.get("amount", 0) for t in sells)

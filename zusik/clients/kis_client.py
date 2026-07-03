@@ -132,10 +132,11 @@ class KISClient:
     def _rate_limit(self, is_order: bool = False):
         """초당 호출 제한 — 최대한 한도에 맞춰 빠르게.
 
-        신규 3일: 초당 3건 → 초당 2.5건으로 운용 (안전마진 15%)
-        3일 이후: 초당 20건 → 초당 18건으로 운용
+        모의투자(is_virtual): 초당 1건 한도 → 0.85건/초로 운용 (계정 성숙과 무관, 항상)
+        실전 신규 3일: 초당 3건 → 초당 2.5건으로 운용 (안전마진 15%)
+        실전 3일 이후: 초당 20건 → 초당 18건으로 운용
 
-        한도 상향 판정:
+        한도 상향 판정 (실전만):
           1) 환경변수 `KIS_API_MATURE=true` → 즉시 18 req/sec
           2) `data/kis_api_start.txt` 파일에 최초 날짜 영속화 → 재시작에도 유지
 
@@ -172,12 +173,17 @@ class KISClient:
                     except Exception:
                         self._api_start_date = datetime.now()
 
-            days_since_start = (datetime.now() - self._api_start_date).days
-            if days_since_start < 3:
-                max_per_sec = 2.5
+            if getattr(self, "is_virtual", False):
+                # 모의투자는 초당 1건만 허용 — 성숙/미성숙 무관하게 고정.
+                # 균등 간격(아래 min_interval)이 실질 강제라 0.85건/초 = 호출 간 ~1.18초.
+                max_per_sec = 0.85
             else:
-                #: 18 → 12 (EGW00201 반복 — 안전마진 확대).
-                max_per_sec = 12
+                days_since_start = (datetime.now() - self._api_start_date).days
+                if days_since_start < 3:
+                    max_per_sec = 2.5
+                else:
+                    #: 18 → 12 (EGW00201 반복 — 안전마진 확대).
+                    max_per_sec = 12
 
             # 균등 간격 강제: 슬라이딩 윈도우만으론 "N콜을 수십ms에 몰아치고 대기"가
             # 가능 → KIS가 미세 버스트를 '초당 거래건수 초과(EGW00201)'로 거부. 호출 사이 최소
@@ -1494,15 +1500,18 @@ class KISClient:
         # 서머타임 판단 (3월 둘째 일요일 ~ 11월 첫째 일요일)
         is_dst = _is_us_dst(now)
 
+        # pre_market은 개장 1시간 전부터 — 장전 리포트(LLM+웹검색 수 분)와 종목 재선별이
+        # 개장 전에 끝나야 개장 매수 우선순위가 실제 개장에 맞춰 준비된다.
+        # (기존 30분 창은 분석이 개장을 넘겨 "장전" 분석이 장중에 도착하던 원인)
         if is_dst:
             # 서머타임: KST 22:30~05:00
-            pre_open = 2200
+            pre_open = 2130
             market_open = 2230
             market_close = 500  # 다음날
             post_close = 600
         else:
             # 겨울: KST 23:30~06:00
-            pre_open = 2300
+            pre_open = 2230
             market_open = 2330
             market_close = 600  # 다음날
             post_close = 700

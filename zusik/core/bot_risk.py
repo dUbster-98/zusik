@@ -263,8 +263,12 @@ class RiskExitMixin:
             logger.debug("tick 무결성 점검 예외", exc_info=True)
             return []
 
-    def _check_risks_before_trading(self) -> bool:
-        """매매 전: 시장 감지 + 자산 평가 + 모드 자동 전환. False면 매매 중단."""
+    def _check_risks_before_trading(self, market: str = "") -> bool:
+        """매매 전: 시장 감지 + 자산 평가 + 모드 자동 전환. False면 매매 중단.
+
+        market="KR"|"US"면 일일 손실한도를 해당 시장 실현손익만으로 판정 —
+        US 새벽 손실이 같은 날짜의 KR장 전체를 막던 문제 방지. 빈 값(암호화폐 등)은
+        기존대로 전체 합산 기준."""
         from zusik.core.trading_mode import check_mode_change, check_deposit, detect_market_condition
 
         # 1) 긴급 홀딩 체크 (shelter 모드 아니라 완전 중단)
@@ -428,17 +432,26 @@ class RiskExitMixin:
                     )
         self._daily_target_cooldown = (self._daily_target_reached == today)
 
-        # 3) 일일 손실한도
-        if self._daily_loss_halted == today:
+        # 3) 일일 손실한도 — 시장별 판정. 한도 자체는 총자산 비례(위에서 계산)를 공유.
+        mkey = market or "ALL"
+        if self._daily_loss_halted.get(mkey) == today:
             return False
 
-        if self.risk.check_daily_loss_limit(realized_today["realized_pnl"]):
-            self._daily_loss_halted = today
-            if self.discord:
-                self.discord.notify_error(
-                    f"일일 손실한도 도달: {realized_today['realized_pnl']:+,}원 — 오늘 매매 중단"
-                )
-            return False
+        if self._daily_loss_released.get(mkey) == today:
+            pass  # 운영자가 /손실해제 — 오늘은 이 시장 손실한도 재발동 안 함 (하드스톱/긴급홀딩은 별개)
+        else:
+            realized_for_market = (
+                self.tracker.get_realized_pnl_today(market=market)["realized_pnl"]
+                if market else realized_today["realized_pnl"]
+            )
+            if self.risk.check_daily_loss_limit(realized_for_market):
+                self._daily_loss_halted[mkey] = today
+                if self.discord:
+                    self.discord.notify_error(
+                        f"[{mkey}] 일일 손실한도 도달: {realized_for_market:+,}원 — "
+                        f"오늘 {mkey} 매매 중단 (/손실해제 로 재개 가능)"
+                    )
+                return False
 
         # 4) 전략 교체 체크
         if total_asset > 0:
