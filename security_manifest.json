@@ -46,7 +46,7 @@
     "zusik/clients/broker.py": "c252fda549bce3c391d25332b89e04e38a812857f503fcdbac2e060329c63e3e",
     "zusik/clients/claude_client.py": "1397555a4cabdf2d768995851a870c2840131129254fc6ca4bbd8981948e2ed9",
     "zusik/clients/crypto_client.py": "36cfc994aa12c2661db74fe08bc1a9aced5d1f90a8c72d0ec65ce81363031592",
-    "zusik/clients/discord_bot.py": "48cac8c53d8e02abbbea4d02dd532b440e4f0f5979c2a396aa026dbf95be17a1",
+    "zusik/clients/discord_bot.py": "d5ed7d2b7a48709bae2edf2c0148382f6a4df7004e0d558904c63b72bf584c94",
     "zusik/clients/discord_commander.py": "0598770cca30872c57ba1963c67fc6a9bf34fe83c0a6922dd6e8e166686f4b96",
     "zusik/clients/discord_notifier.py": "ef95c1482582a202be7a4116afa44f0f834ef6a73cb36f9aa2d3ddc6f040bbec",
     "zusik/clients/kis_client.py": "ac2df190ca688e398766c31cb314c106d1686b94b1a3f6a259b71ec8fabee5cb",

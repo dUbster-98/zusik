@@ -37,9 +37,11 @@ def _is_owner(interaction: discord.Interaction) -> bool:
     계정 탈취 = 원격 매매·업데이트 권한이라 제거 — 매매 명령을 쓰려면
     DISCORD_OWNER_ID 를 명시해야 한다. 알림(webhook)은 권한과 무관하게 동작.
     """
-    if _OWNER_ID == 0:
+    # import 시점에는 main()의 load_dotenv 전이라 _OWNER_ID가 0일 수 있음 → 검사 시점 재조회
+    owner_id = _OWNER_ID or _parse_owner_id(os.getenv("DISCORD_OWNER_ID"))
+    if owner_id == 0:
         return False
-    return interaction.user.id == _OWNER_ID
+    return interaction.user.id == owner_id
 
 
 # ── 알림 채널 선택 ──
