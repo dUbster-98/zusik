@@ -5093,6 +5093,156 @@ class RegimeSelectionTests(unittest.TestCase):
         order = self._order(b._rank_by_relative_strength(stocks, "KR"))
         self.assertEqual(order[0], "012450", "활성 이벤트 섹터(방산) 종목이 부스트로 우선이어야 함")
 
+    def test_event_pick_injected_but_rs_gated(self):
+        # 호재 수혜 종목은 풀에 없어도 편입되지만, RS 게이트로 식은 종목은 탈락(과편입 방지).
+        b = self._bot(bear=0.10)
+        b.config["selection"]["event_picks"] = True
+        b.config["selection"]["event_pick_max"] = 2
+        b.config["screening"] = {"blacklist_kr": []}
+        b._active_event_picks = {"kr": [{"code": "STRONGPICK", "name": "호재주"},
+                                        {"code": "WEAKPICK", "name": "식은호재"}], "us": []}
+        data = {"STRONGPICK": {"rs": 0.09, "vol": 0.02},    # 지수 아웃퍼폼 → 통과
+                "WEAKPICK":   {"rs": -0.20, "vol": 0.02}}   # 지수 크게 언더 → RS 게이트 탈락
+        idx = Mock(); idx.empty = False
+        b.client.get_ohlcv.side_effect = lambda sym, **k: (idx if sym == "069500"
+                                                           else data.get(sym, {"rs": 0.0, "vol": 0.02}))
+        order = self._order(b._rank_by_relative_strength([{"code": "HIGHVOL"}], "KR"))
+        self.assertIn("STRONGPICK", order, "호재 수혜(강)는 편입되어야 함")
+        self.assertNotIn("WEAKPICK", order, "식은 호재는 RS 게이트로 탈락해야 함(과편입 방지)")
+
+
+class NewsEventDefensiveTests(unittest.TestCase):
+    """뉴스 악재→defensive / 호재→극성 태깅.
+
+    되돌리면(뉴스 극성 무시, 또는 뉴스로 _market_condition 승격) 이 테스트가 깨진다.
+    핵심 불변식: 뉴스 악재는 신규 매수만 조이고(보유 유지) _market_condition 은 건드리지 않는다
+    — 뉴스 오탐 한 건에 인버스 매수/바닥투매가 새지 않게 하기 위함.
+    """
+
+    def _signals(self):
+        from zusik.analysis.smart_signals import SmartSignals
+        return SmartSignals({})
+
+    # ── Part 1: 극성 분류 ──
+    def test_war_news_is_negative(self):
+        res = self._signals().check_event_beneficiary("이스라엘 이란 미사일 공습, 전쟁 격화", "peace")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["polarity"], "negative")
+        self.assertTrue(res["negative_events"], "전쟁 뉴스는 negative_events 를 채워야 함")
+
+    def test_positive_news_is_positive(self):
+        res = self._signals().check_event_beneficiary("연준 금리 인하 완화 기대, 비둘기 신호", "peace")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["polarity"], "positive")
+        self.assertIn("rate_cut", res["positive_events"])
+        self.assertFalse(res["negative_events"], "호재만 있으면 negative_events 는 비어야 함")
+
+    def test_peace_no_news_returns_none(self):
+        self.assertIsNone(self._signals().check_event_beneficiary("", "peace"))
+
+    def test_crisis_fallback_is_negative(self):
+        # 뉴스 없이 crisis 국면이면 recession(negative) 폴백 → 악재 취급
+        res = self._signals().check_event_beneficiary("", "crisis")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["polarity"], "negative")
+        self.assertIn("recession", res["negative_events"])
+
+    # ── Part 2: 악재→defensive 배선 ──
+    def _bot(self, market_condition="peace"):
+        import os
+        import tempfile
+        from zusik.core.bot import TradingBot
+        b = TradingBot.__new__(TradingBot)
+        b.signals = self._signals()
+        b._market_condition = market_condition
+        b._active_event_sectors = set()
+        b._news_defensive = False
+        b._active_event_picks = {"kr": [], "us": []}
+        b._ACTIVE_EVENT_FILE = os.path.join(tempfile.mkdtemp(), "active_event_sectors.json")
+        return b
+
+    # ── Part 3: 호재 수혜 종목 편입 ──
+    def _merge_bot(self, picks, event_picks=True, cap=2, blacklist=None):
+        from zusik.core.bot import TradingBot
+        b = TradingBot.__new__(TradingBot)
+        b.config = {"selection": {"event_picks": event_picks, "event_pick_max": cap},
+                    "screening": {"blacklist_kr": list(blacklist or [])}}
+        b._active_event_picks = {"kr": list(picks), "us": []}
+        b._is_derivative_etf = lambda code="", name="": False
+        return b
+
+    def test_positive_news_populates_event_picks(self):
+        b = self._bot()
+        b._refresh_active_event_sectors("반도체 슈퍼사이클 데이터센터 GPU 수요 폭발")
+        self.assertTrue(b._active_event_picks["kr"], "호재 → KR 수혜 편입 후보가 채워져야 함")
+
+    def test_negative_news_no_event_picks(self):
+        b = self._bot()
+        b._refresh_active_event_sectors("이란 미사일 전쟁 공습")
+        self.assertFalse(b._active_event_picks["kr"], "악재 수혜(방어주)는 편입 후보에 안 들어감")
+        self.assertFalse(b._active_event_picks["us"])
+
+    def test_merge_event_picks_caps(self):
+        picks = [{"code": "A", "name": "a"}, {"code": "B", "name": "b"}, {"code": "C", "name": "c"}]
+        b = self._merge_bot(picks, cap=2)
+        codes = [s["code"] for s in b._merge_event_picks([{"code": "Z", "name": "z"}], "KR")]
+        self.assertEqual(codes[0], "Z", "기존 풀 종목은 유지")
+        self.assertEqual(len([c for c in codes if c in ("A", "B", "C")]), 2, "cap 만큼만 편입")
+
+    def test_merge_event_picks_respects_blacklist_and_dedup(self):
+        picks = [{"code": "A", "name": "a"}, {"code": "B", "name": "b"}]
+        b = self._merge_bot(picks, blacklist=["A"])
+        codes = [s["code"] for s in b._merge_event_picks([{"code": "B", "name": "b"}], "KR")]
+        self.assertEqual(codes, ["B"], "A=blacklist, B=중복 → 아무것도 추가 안 됨")
+
+    def test_merge_event_picks_disabled(self):
+        b = self._merge_bot([{"code": "A", "name": "a"}], event_picks=False)
+        codes = [s["code"] for s in b._merge_event_picks([{"code": "Z", "name": "z"}], "KR")]
+        self.assertEqual(codes, ["Z"], "event_picks=false 면 편입 안 함")
+
+    def test_negative_news_sets_news_defensive(self):
+        b = self._bot()
+        b._refresh_active_event_sectors("이란 미사일 전쟁 공습 격화")
+        self.assertTrue(b._news_defensive, "전쟁 뉴스 → _news_defensive ON")
+
+    def test_positive_news_no_news_defensive(self):
+        b = self._bot()
+        b._refresh_active_event_sectors("반도체 슈퍼사이클 데이터센터 GPU 수요 폭발")
+        self.assertFalse(b._news_defensive, "호재 뉴스는 _news_defensive 를 켜지 않아야 함")
+
+    def test_negative_news_does_not_escalate_market_condition(self):
+        # 안전 불변식: 뉴스만으로 _market_condition 을 올리면 인버스 오매수/청산 위험
+        b = self._bot(market_condition="peace")
+        b._refresh_active_event_sectors("전쟁 미사일 공습")
+        self.assertEqual(b._market_condition, "peace",
+                         "뉴스 악재는 _market_condition 을 승격하면 안 됨(인버스 오매수 방지)")
+
+    def test_apply_news_defensive_forces_defensive(self):
+        from zusik.core.bot import TradingBot
+        b = TradingBot.__new__(TradingBot)
+        b.defensive_mode_enabled = True
+        b._defensive_mode = False
+        b._news_defensive = True
+        b._apply_news_defensive()
+        self.assertTrue(b._defensive_mode, "뉴스 악재 플래그 → defensive 모드 ON")
+
+    def test_apply_news_defensive_respects_disabled(self):
+        from zusik.core.bot import TradingBot
+        b = TradingBot.__new__(TradingBot)
+        b.defensive_mode_enabled = False   # 적극 회복 모드
+        b._defensive_mode = False
+        b._news_defensive = True
+        b._apply_news_defensive()
+        self.assertFalse(b._defensive_mode, "defensive_mode_enabled=false 면 뉴스도 무시")
+
+    def test_stale_event_state_ignored(self):
+        # TTL 밖(며칠 전) 상태는 무시 — 오래된 악재가 재시작 후 매수를 막지 않게
+        from zusik.core.bot import TradingBot
+        self.assertFalse(TradingBot._event_state_fresh("", 48))
+        self.assertFalse(TradingBot._event_state_fresh("2000-01-01T00:00:00", 48))
+        from datetime import datetime
+        self.assertTrue(TradingBot._event_state_fresh(datetime.now().isoformat(), 48))
+
 
 class SelectionMethodTests(unittest.TestCase):
     """종목 선택 방식 플러그블 — MC 외 momentum/trend/low_vol 점수가 의도대로 정렬."""
@@ -7411,6 +7561,7 @@ def run_runtime_unittests():
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(FastExitScanTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(MultiMessengerTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RegimeSelectionTests))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(NewsEventDefensiveTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(SelectionMethodTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(OpenGuardTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(FastEntryTests))

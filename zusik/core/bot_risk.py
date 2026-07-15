@@ -263,6 +263,20 @@ class RiskExitMixin:
             logger.debug("tick 무결성 점검 예외", exc_info=True)
             return []
 
+    def _apply_news_defensive(self) -> None:
+        """뉴스 악재 플래그(self._news_defensive) → defensive 모드 반영.
+
+        신규 매수만 조여 현금을 자연 확보하고 보유는 유지한다(바닥투매 금지 원칙).
+        _market_condition 은 건드리지 않는다 — 뉴스 오탐 한 건에 인버스 매수
+        (_should_allow_inverse_entry 는 crisis/war 에서 발동)나 강제 청산이 새지 않게 한다.
+        defensive_mode_enabled=false면 뉴스도 무시(적극 회복 모드 존중).
+        """
+        if not self.defensive_mode_enabled:
+            return
+        if getattr(self, "_news_defensive", False) and not self._defensive_mode:
+            self._defensive_mode = True
+            logger.info("뉴스 악재 감지 → defensive 모드 (신규 매수 조임, 보유는 유지)")
+
     def _check_risks_before_trading(self, market: str = "") -> bool:
         """매매 전: 시장 감지 + 자산 평가 + 모드 자동 전환. False면 매매 중단.
 
@@ -319,6 +333,10 @@ class RiskExitMixin:
                     logger.warning("드로우다운 %.2f%% → defensive 모드 강제 활성", current_dd)
             except Exception:
                 pass
+
+            # 뉴스 악재(전쟁·팬데믹·경기침체 등) 감지 → defensive 유지.
+            # 장전 리포트에서 _refresh_active_event_sectors 가 self._news_defensive 를 세팅한다.
+            self._apply_news_defensive()
 
         # ── 빠른 시장 급락 가드 (1-2 tick): 메가캡발/지수 급락 → 신규 진입 중단 + 방어 + 헷지 ──
         # 보유는 자르지 않는다(hold-floor 유지). 매수 게이트가 _fast_fall_active 를 보고 차단,

@@ -389,7 +389,11 @@ class TradingBot(
         self._market_condition: str = "peace"
         self._bear_cache: tuple[float, float] = (0.0, 0.0)  # (epoch, score)
         # 이벤트 로테이션: 장전 리포트에서 감지한 활성 수혜 섹터 (선별 부스트에 사용)
+        # _load_active_event_sectors 가 부수효과로 self._news_defensive 를 세팅한다(뉴스 악재 방어 플래그).
         self._active_event_sectors: set = self._load_active_event_sectors()
+        self._news_defensive: bool = getattr(self, "_news_defensive", False)
+        # 호재 이벤트 수혜 편입 후보 (_load_active_event_sectors 가 부수효과로 세팅)
+        self._active_event_picks: dict = getattr(self, "_active_event_picks", {"kr": [], "us": []})
         # 재진입 차단 (crash_instant/slow_bleed 매도 후 일정시간 재매수 금지) + 일일 churn 방지
         self._reentry_block: dict[str, tuple[float, str]] = {}  # code → (until_epoch, reason)
         self._daily_sell_count: dict[str, int] = {}  # code → 오늘 매도 횟수

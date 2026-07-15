@@ -173,54 +173,71 @@ class SmartSignals:
     # ══════════════════════════════════════
 
     # 이벤트 유형별 키워드 → 수혜 섹터 매핑
+    # polarity: "negative"(악재 — 신규 매수 조이고 현금 확보) / "positive"(호재 — 수혜 섹터
+    #           적극 편입) / "neutral"(방향성 모호 — 섹터 로테이션만, 방어/공격 안 함).
+    #   악재→defensive 배선은 negative 만 사용(_refresh_active_event_sectors → _news_defensive).
+    #   주의: polarity 는 _market_condition 을 바꾸지 않는다 — 뉴스 오탐 한 건에 인버스 매수/
+    #        바닥투매가 발동하지 않도록 신규 매수만 조이는 defensive 로만 반영한다.
     EVENT_MAP = {
         "war": {
             "keywords": ["전쟁", "미사일", "폭격", "공습", "교전", "침공", "war", "missile", "bombing", "attack", "invasion"],
             "sectors": ["defense", "gold", "energy"],
+            "polarity": "negative",
         },
         "middle_east": {
             "keywords": ["이란", "iran", "중동", "호르무즈", "사우디", "이스라엘", "israel"],
             "sectors": ["defense", "gold", "energy", "shipping"],
+            "polarity": "negative",
         },
         "pandemic": {
             "keywords": ["팬데믹", "pandemic", "바이러스", "virus", "봉쇄", "lockdown", "격리", "확진", "변이"],
             "sectors": ["pharma", "biotech", "remote_work", "delivery"],
+            "polarity": "negative",
         },
         "inflation": {
             "keywords": ["인플레", "inflation", "물가", "CPI 상승", "금리 인상", "rate hike", "긴축"],
             "sectors": ["energy", "gold", "commodity", "bank"],
+            "polarity": "negative",
         },
         "rate_cut": {
             "keywords": ["금리 인하", "rate cut", "완화", "비둘기", "dovish", "양적완화", "QE"],
             "sectors": ["growth_tech", "reits", "construction"],
+            "polarity": "positive",
         },
         "recession": {
             "keywords": ["경기침체", "recession", "불황", "GDP 역성장", "실업률 상승", "디폴트"],
             "sectors": ["essential", "utility", "gold", "bond_etf"],
+            "polarity": "negative",
         },
         "tech_boom": {
             "keywords": ["AI 혁명", "AI boom", "반도체 슈퍼사이클", "데이터센터", "GPU 수요", "클라우드 폭발"],
             "sectors": ["ai_semi", "cloud", "growth_tech"],
+            "polarity": "positive",
         },
         "climate": {
             "keywords": ["태풍", "홍수", "가뭄", "폭염", "재해", "기후", "climate", "hurricane", "flood"],
             "sectors": ["construction", "insurance", "energy"],
+            "polarity": "negative",
         },
         "election": {
             "keywords": ["대선", "총선", "선거", "election", "정권교체", "대통령"],
             "sectors": ["construction", "defense", "policy"],
+            "polarity": "neutral",
         },
         "usd_strong": {
             "keywords": ["달러 강세", "원화 약세", "환율 급등", "1500원", "달러 인덱스"],
             "sectors": ["export", "energy"],
+            "polarity": "neutral",
         },
         "usd_weak": {
             "keywords": ["달러 약세", "원화 강세", "환율 하락", "달러 하락"],
             "sectors": ["import", "travel"],
+            "polarity": "neutral",
         },
         "supply_chain": {
             "keywords": ["공급망", "supply chain", "반도체 부족", "물류 대란", "항만 폐쇄", "수에즈"],
             "sectors": ["shipping", "commodity", "logistics"],
+            "polarity": "negative",
         },
     }
 
@@ -368,6 +385,38 @@ class SmartSignals:
         }
         event_labels = [event_names.get(e, e) for e in detected_events]
 
+        # 극성 분류 — 악재(negative)면 defensive 배선이 신규 매수를 조인다
+        # (_refresh_active_event_sectors → _news_defensive). 호재(positive)는 수혜 섹터 부스트용.
+        negative_events = [e for e in detected_events
+                           if self.EVENT_MAP.get(e, {}).get("polarity") == "negative"]
+        positive_events = [e for e in detected_events
+                           if self.EVENT_MAP.get(e, {}).get("polarity") == "positive"]
+        if negative_events and positive_events:
+            polarity = "mixed"
+        elif negative_events:
+            polarity = "negative"
+        elif positive_events:
+            polarity = "positive"
+        else:
+            polarity = "neutral"
+
+        # 호재(positive) 이벤트의 수혜 종목만 별도 수집 — 후보 풀 편입용(_active_event_picks).
+        # 악재 수혜(방어주)는 편입하지 않으므로 여기서 제외한다.
+        positive_sectors: set = set()
+        for e in positive_events:
+            positive_sectors.update(self.EVENT_MAP.get(e, {}).get("sectors", []))
+        pos_kr, pos_us = [], []
+        seen_pk, seen_pu = set(), set()
+        for sector in positive_sectors:
+            for s in self.SECTOR_STOCKS_KR.get(sector, []):
+                if s["code"] not in seen_pk:
+                    pos_kr.append(s)
+                    seen_pk.add(s["code"])
+            for s in self.SECTOR_STOCKS_US.get(sector, []):
+                if s["ticker"] not in seen_pu:
+                    pos_us.append(s)
+                    seen_pu.add(s["ticker"])
+
         result = {
             "action": "event_buy",
             "events": detected_events,
@@ -376,6 +425,12 @@ class SmartSignals:
             "matched_keywords": list(set(all_matched))[:10],
             "kr_stocks": kr_stocks[:8],
             "us_stocks": us_stocks[:6],
+            "polarity": polarity,
+            "negative_events": negative_events,
+            "positive_events": positive_events,
+            "positive_sectors": sorted(positive_sectors),
+            "positive_kr_stocks": pos_kr[:6],
+            "positive_us_stocks": pos_us[:4],
             "reason": f"이벤트 감지: {', '.join(event_labels)} → 수혜 {len(all_sectors)}섹터",
         }
         logger.info("이벤트 수혜: %s (키워드: %s)", result["reason"], ", ".join(all_matched[:5]))

@@ -867,40 +867,122 @@ class SelectionMixin:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _event_state_fresh(updated_iso: str, hours: float = 48) -> bool:
+        """이벤트 상태 파일의 updated 타임스탬프가 hours 이내면 True (빈 값/파싱 실패=False).
+
+        며칠 전 전쟁 헤드라인이 재시작 후에도 계속 매수를 막는 것 방지 — 오래된 상태는 무시.
+        """
+        if not updated_iso:
+            return False
+        try:
+            ts = datetime.fromisoformat(updated_iso)
+        except Exception:
+            return False
+        delta = (datetime.now() - ts).total_seconds()
+        return 0 <= delta <= hours * 3600
+
     def _load_active_event_sectors(self) -> set:
+        """저장된 활성 이벤트 섹터 로드. 부수효과로 self._news_defensive 세팅 (TTL 48h).
+
+        오래된 파일(>48h)은 무시 — 며칠 전 악재가 재시작 후에도 매수를 막지 않게 한다.
+        """
+        self._news_defensive = False
+        self._active_event_picks = {"kr": [], "us": []}
         try:
             import json
             if os.path.exists(self._ACTIVE_EVENT_FILE):
                 with open(self._ACTIVE_EVENT_FILE, encoding="utf-8") as f:
-                    return set(json.load(f).get("sectors", []))
+                    data = json.load(f)
+                if self._event_state_fresh(data.get("updated", "")):
+                    self._news_defensive = bool(data.get("news_defensive", False))
+                    picks = data.get("event_picks", {}) or {}
+                    self._active_event_picks = {"kr": list(picks.get("kr", [])),
+                                                "us": list(picks.get("us", []))}
+                    return set(data.get("sectors", []))
         except Exception:
             pass
         return set()
 
     def _refresh_active_event_sectors(self, report_text: str = ""):
-        """장전 리포트(뉴스)에서 이벤트 감지 → 활성 수혜 섹터 갱신 + 영속화.
+        """장전 리포트(뉴스)에서 이벤트 감지 → 활성 수혜 섹터 + 악재 방어 플래그 갱신 + 영속화.
 
         이벤트 로테이션: _rank_by_relative_strength 가 활성 섹터 종목을 부스트.
-        평시·이벤트 없음이면 빈 집합(부스트 없음).
+        악재(negative) 이벤트 감지 시 self._news_defensive=True → _check_risks_before_trading 가
+        defensive 모드를 유지(신규 매수만 조여 현금 자연 확보, 보유는 안 팜, market_condition 불변).
+        평시·이벤트 없음이면 빈 집합 + 방어 플래그 off.
         """
         try:
             res = self.signals.check_event_beneficiary(report_text or "", self._market_condition)
         except Exception:
             res = None
         sectors = set(res.get("sectors", [])) if res else set()
+        negative_events = list((res or {}).get("negative_events", []))
+        news_defensive = bool(negative_events)
+        picks = {"kr": list((res or {}).get("positive_kr_stocks", [])),
+                 "us": list((res or {}).get("positive_us_stocks", []))}
         self._active_event_sectors = sectors
+        self._news_defensive = news_defensive
+        self._active_event_picks = picks
         try:
             import json
             os.makedirs("data", exist_ok=True)
             with open(self._ACTIVE_EVENT_FILE, "w", encoding="utf-8") as f:
                 json.dump({"sectors": sorted(sectors),
                            "events": (res or {}).get("event_labels", []),
+                           "negative_events": negative_events,
+                           "news_defensive": news_defensive,
+                           "event_picks": picks,
                            "updated": datetime.now().isoformat()}, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
         if sectors:
             logger.info("활성 이벤트 섹터: %s (%s)", ", ".join(sorted(sectors)),
                         ", ".join((res or {}).get("event_labels", [])))
+        if news_defensive:
+            logger.warning("뉴스 악재 감지(%s) → defensive 유지: 신규 매수 조임(보유는 유지)",
+                           ", ".join((res or {}).get("event_labels", [])))
+        if picks["kr"] or picks["us"]:
+            logger.info("호재 수혜 편입 후보: KR %d종, US %d종",
+                        len(picks["kr"]), len(picks["us"]))
+
+    def _merge_event_picks(self, stocks: list[dict], market: str) -> list[dict]:
+        """호재(positive) 이벤트 수혜 종목을 후보 풀에 소량 편입 (moderate).
+
+        - 상한: config.selection.event_pick_max (기본 2) — 과편입 방지
+        - dedup + blacklist 존중 + 파생ETF 필터
+        - 강제 매수 아님: 편입만 하고 매수는 평소 분석/RS 게이트/매수 게이트를 그대로 거친다.
+          (Claude 경로는 이 리스트가 _rank_by_relative_strength 의 RS 게이트도 통과해야 함.)
+        악재 수혜(방어주)는 편입 대상이 아니다 — _active_event_picks 엔 호재 종목만 담긴다.
+        """
+        sel = (self.config.get("selection", {}) or {})
+        if not sel.get("event_picks", True):
+            return stocks
+        bucket = "kr" if market == "KR" else "us"
+        picks = (getattr(self, "_active_event_picks", {}) or {}).get(bucket, [])
+        if not picks:
+            return stocks
+        cap = int(sel.get("event_pick_max", 2))
+        screen_cfg = self.config.get("screening", {})
+        key = "code" if market == "KR" else "ticker"
+        bl = set(screen_cfg.get("blacklist_kr" if market == "KR" else "blacklist_us", []) or [])
+        existing = {s.get(key, "") for s in stocks}
+        out = list(stocks)
+        added: list[str] = []
+        for p in picks:
+            if len(added) >= cap:
+                break
+            sym = p.get(key, "")
+            if not sym or sym in existing or sym in bl:
+                continue
+            if self._is_derivative_etf(sym, p.get("name", "")):
+                continue
+            out.append(dict(p))
+            existing.add(sym)
+            added.append(p.get("name", sym))
+        if added:
+            logger.info("%s 호재 수혜 편입 (%d/%d): %s", market, len(added), cap, ", ".join(added))
+        return out
 
     def _rank_by_relative_strength(self, stocks: list[dict], market: str) -> list[dict]:
         """선별 후보를 지수 대비 RS로 필터 + 상황 적응(레짐/로테이션) 틸트로 정렬.
@@ -910,7 +992,11 @@ class SelectionMixin:
             상승장이면 RS(모멘텀) 그대로. (config.selection.regime_adaptive)
           - 로테이션: 최근 매도(_reentry_block) 종목은 소폭 디프리오리타이즈 — 같은 테마 쏠림 방지.
         인버스/파생은 RS·틸트 제외(태생적 역RS). 실패 시 원본 그대로(보조 게이트).
+
+        호재 수혜 종목을 여기서 소량 편입한다(_merge_event_picks) — 편입분도 아래 RS 게이트를
+        그대로 통과해야 하므로, 뉴스가 이미 반영돼 지수 대비 식은 종목은 자동 탈락(과편입 방지).
         """
+        stocks = self._merge_event_picks(stocks, market)
         if not stocks:
             return stocks
         sel = (self.config.get("selection", {}) or {})
@@ -1327,6 +1413,7 @@ class SelectionMixin:
                     if wl:
                         logger.info("KR whitelist 강제 편입 (%d종): %s",
                                     len(wl), ", ".join(w.get("name", w.get("code","")) for w in wl))
+                    kr_list = self._merge_event_picks(kr_list, "KR")   # 호재 수혜 소량 편입
                     self.kr_stocks = kr_list
                 if us_top:
                     us_list = [{"ticker": r["info"][0], "name": r["info"][1],
@@ -1343,6 +1430,7 @@ class SelectionMixin:
                     if wl_us:
                         logger.info("US whitelist 강제 편입 (%d종): %s",
                                     len(wl_us), ", ".join(w.get("name", w.get("ticker","")) for w in wl_us))
+                    us_list = self._merge_event_picks(us_list, "US")   # 호재 수혜 소량 편입
                     self.us_stocks = us_list
 
                 # Discord 알림
