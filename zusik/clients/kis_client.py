@@ -64,25 +64,58 @@ class KISClient:
     # data/data/kis_token.json 같은 중복 위치에 생기지 않게 한다.
     _TOKEN_FILE = paths.data_path("kis_token.json")
 
-    def _ensure_token(self):
-        """액세스 토큰이 없거나 만료 임박하면 재발급. 파일 캐시로 중복 발급 방지."""
+    def _cache_fingerprint(self) -> str:
+        """토큰 캐시를 현재 자격증명·환경에 묶는 지문.
+
+        app_key + 실전/모의 도메인을 해시. 앱키/시크릿을 바꾸거나 실전↔모의를
+        전환하면 지문이 달라져 옛 토큰 캐시가 자동 폐기된다. 시크릿 원문은
+        저장하지 않고 해시만 남긴다.
+        """
+        import hashlib
+        raw = f"{self.app_key}:{self.app_secret}:{int(self.is_virtual)}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def _ensure_token(self, force: bool = False):
+        """액세스 토큰이 없거나 만료 임박하면 재발급. 파일 캐시로 중복 발급 방지.
+
+        force=True면 메모리/파일 캐시를 무시하고 무조건 신규 발급한다.
+        KIS는 앱키당 활성 토큰이 1개라, 다른 경로에서 토큰을 재발급하면 기존
+        토큰이 서버에서 즉시 무효화된다. 이때 로컬 `expires`는 아직 유효로 남아
+        있어 캐시만 믿으면 죽은 토큰을 계속 쓰게 되므로, 서버가 EGW00123
+        (기간 만료)로 거부하면 force 재발급으로 자가 복구한다.
+        """
         import json as _json
+
+        if force:
+            self._access_token = ""
+            self._token_expires = datetime.min
+            try:
+                if os.path.exists(self._TOKEN_FILE):
+                    os.remove(self._TOKEN_FILE)
+            except OSError:
+                pass
 
         # 메모리 캐시 확인
         if self._access_token and datetime.now() < self._token_expires - timedelta(hours=1):
             return
 
         # 파일 캐시 확인 (다른 프로세스가 발급한 토큰 재사용)
+        #: 캐시가 app_key/실전여부에 묶여 있어야 한다 — 자격증명을 바꾸면 옛 키로
+        # 발급된 토큰은 새 앱키에서 무효(EGW00123)인데, 지문이 없으면 저장된
+        # expires 만 믿고 죽은 토큰을 계속 써서 크래시한다. 지문 불일치면 캐시 무시.
         try:
             if os.path.exists(self._TOKEN_FILE):
                 with open(self._TOKEN_FILE, encoding="utf-8") as f:
                     cached = _json.load(f)
                 expires = datetime.strptime(cached["expires"], "%Y-%m-%d %H:%M:%S")
-                if datetime.now() < expires - timedelta(hours=1):
+                fp_ok = cached.get("fp") == self._cache_fingerprint()
+                if fp_ok and datetime.now() < expires - timedelta(hours=1):
                     self._access_token = cached["token"]
                     self._token_expires = expires
                     logger.info("KIS 토큰 캐시 사용 (만료: %s)", expires)
                     return
+                if not fp_ok:
+                    logger.info("KIS 앱키/환경 변경 감지 — 토큰 캐시 폐기 후 재발급")
         except Exception:
             pass
 
@@ -108,7 +141,9 @@ class KISClient:
         try:
             os.makedirs(os.path.dirname(self._TOKEN_FILE), exist_ok=True)
             with open(self._TOKEN_FILE, "w", encoding="utf-8") as f:
-                _json.dump({"token": self._access_token, "expires": self._token_expires.strftime("%Y-%m-%d %H:%M:%S")}, f)
+                _json.dump({"token": self._access_token,
+                            "expires": self._token_expires.strftime("%Y-%m-%d %H:%M:%S"),
+                            "fp": self._cache_fingerprint()}, f)
             try:
                 os.chmod(self._TOKEN_FILE, 0o600)
             except OSError:
@@ -257,6 +292,18 @@ class KISClient:
                 if resp is None:
                     raise
                 body_preview = (resp.text or "")[:500]
+                # 토큰 만료/무효 재시도: 캐시된 토큰이 저장된 만료시각 이전에 서버에서
+                # 무효화된 경우(앱키당 활성 토큰 1개 — 다른 경로 재발급 시 기존 토큰 revoke).
+                #: 캐시만 믿어 죽은 토큰으로 계속 크래시하던 문제 — force 재발급 후 재시도.
+                token_expired = ("EGW00123" in body_preview       # 기간이 만료된 token
+                                 or "EGW00121" in body_preview     # 유효하지 않은 token
+                                 or "만료된 token" in body_preview)
+                if token_expired and attempt < 2:
+                    logger.warning("KIS 토큰 무효(%s) — 강제 재발급 후 재시도 (%d/3): %s",
+                                   resp.status_code, attempt + 2, path)
+                    self._ensure_token(force=True)
+                    last_err = e
+                    continue
                 # rate limit 재시도: 429 + EGW00201(원장 초당 거래건수 초과, HTTP 500으로 옴).
                 #: EGW00201이 재시도 안 돼 KR 매매가 크래시하던 문제 — backoff 재시도.
                 rate_limited = (resp.status_code == 429

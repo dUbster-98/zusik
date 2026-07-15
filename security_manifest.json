@@ -49,7 +49,7 @@
     "zusik/clients/discord_bot.py": "d5ed7d2b7a48709bae2edf2c0148382f6a4df7004e0d558904c63b72bf584c94",
     "zusik/clients/discord_commander.py": "0598770cca30872c57ba1963c67fc6a9bf34fe83c0a6922dd6e8e166686f4b96",
     "zusik/clients/discord_notifier.py": "ef95c1482582a202be7a4116afa44f0f834ef6a73cb36f9aa2d3ddc6f040bbec",
-    "zusik/clients/kis_client.py": "ac2df190ca688e398766c31cb314c106d1686b94b1a3f6a259b71ec8fabee5cb",
+    "zusik/clients/kis_client.py": "a8ba9243e59b18b1bf49516833f43b9d7dc3d1f96fb9dfbee43a63dc518ff0e3",
     "zusik/clients/kis_websocket.py": "37528e05637e12943d2875054d819ba8f42baf306ce8e8a5f041be21f1f4175f",
     "zusik/clients/local_llm.py": "9831f3f13a32dc87d5338c39b12b0e14ee703209355f0ee08c6f51acce627622",
     "zusik/clients/notifier.py": "4d8806d9687a9d8c8bc1ef31a445e905d3a553f300e77ac552e58a5687c99bf2",
