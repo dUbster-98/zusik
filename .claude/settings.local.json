@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Skill(claude-api)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git config *)",
+      "Bash(git push *)"
     ]
   }
 }

@@ -1325,16 +1325,23 @@ class SelectionMixin:
                     except Exception:
                         return None
 
-                logger.info("자동 스크리닝 시작 (KR %d / US %d 후보)",
-                            len(KR_CANDIDATE_POOL), len(US_CANDIDATE_POOL))
+                # 시장 토글 — 꺼진 시장은 후보 풀 fetch 자체를 건너뛴다.
+                # (예전엔 kr_enabled=false 여도 KR 을 스크리닝해 self.kr_stocks 를
+                #  덮어써 감시 종목에 한국 종목이 4시간마다 되살아났다.)
+                kr_on = bool(getattr(self, "kr_enabled", True))
+                us_on = bool(getattr(self, "us_enabled", True))
+                logger.info("자동 스크리닝 시작 (KR %d / US %d 후보, KR=%s US=%s)",
+                            len(KR_CANDIDATE_POOL) if kr_on else 0,
+                            len(US_CANDIDATE_POOL) if us_on else 0,
+                            "on" if kr_on else "off", "on" if us_on else "off")
 
                 import time as _t
                 t0 = _t.time()
                 sel_method = str((self.config.get("screening", {}) or {}).get("method", "monte_carlo"))
                 kr_scored = screener.screen_market(KR_CANDIDATE_POOL, _fetch_kr,
-                                                   runner, n_paths=n_paths, method=sel_method)
+                                                   runner, n_paths=n_paths, method=sel_method) if kr_on else []
                 us_scored = screener.screen_market(US_CANDIDATE_POOL, _fetch_us,
-                                                   runner, n_paths=n_paths, method=sel_method)
+                                                   runner, n_paths=n_paths, method=sel_method) if us_on else []
                 elapsed = _t.time() - t0
                 logger.info("자동 스크리닝 완료: %.1f초 (KR %d / US %d 평가)",
                             elapsed, len(kr_scored), len(us_scored))

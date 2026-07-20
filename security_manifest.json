@@ -63,7 +63,7 @@
     "zusik/core/bot_kr.py": "d653f9753bea7f85546f365dabc18c1628f339a9f4a1c629aac07d521efa2cf5",
     "zusik/core/bot_reporting.py": "2d06efe76068cb8ac934d0361f05c059c64f6114af655010bb14a6341a7a15ae",
     "zusik/core/bot_risk.py": "9a4d4e369382eb6b220001a8bc930c21eabc7b7c96efd1c1c00294fb7cfb503d",
-    "zusik/core/bot_selection.py": "9125435da39929ebabd1b0467cef52af3236b18f2948319e37c1328ce8c07059",
+    "zusik/core/bot_selection.py": "f9ad83284eaabe75f2c3791708f55571a41ea1ad43157cf01a85a739ebd687a3",
     "zusik/core/bot_sizing.py": "95b654b8e9360c9fdde78b180560886fd3c8e45f50e3901d2682351065708898",
     "zusik/core/bot_us.py": "1ddf49eab185ddd3e9ee544403fb3659d989cb35fa4d8d7f3685eb5ef40cde59",
     "zusik/core/cost_optimizer.py": "a01a42f602b59136309ebae1e37f2acb896ae4df4af0da41fddabb188cba75fe",
