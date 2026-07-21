@@ -178,8 +178,11 @@ screening:
   whitelist_us:
     - { ticker: "NVDA", name: "NVIDIA", exchange: "NASD" }
     - { ticker: "AAPL", name: "Apple", exchange: "NASD" }
-    - { ticker: "MSFT", name: "Microsoft", exchange: "NASD" }
-  screen_interval_hours: 2  # 복구 (절감 시 6h → 원복 2h)
+    # MSFT 제외 → AMD/INTC 편입 (사용자 요청, 2026-07-20). 반도체 비중이
+    # NVDA 포함 3종으로 올라감 — 섹터 쏠림 감수한 의도적 구성.
+    - { ticker: "AMD", name: "AMD", exchange: "NASD" }
+    - { ticker: "INTC", name: "Intel", exchange: "NASD" }
+  screen_interval_hours: 3  # 2→3 (2026-07-21, AI 사용량 소폭 절감)
   # numpy 자동 스크리닝(감시종목 재랭킹) 주기. 일 1회→4h로 단축해 watch list가
   # 시장 변동을 따라가게. (현금 무관 재랭킹 — 고정 종목이 시장 흐름 무시하던 문제 해결.)
   auto_screen_interval_hours: 4
@@ -345,8 +348,10 @@ strategy:
   #   웹검색은 계속 full만 — quick 웹검색(호출당 5분 타임아웃)이 과거 폭증의 핵심 원인.
   claude_vol_hold: 0.04            # 보유종목 Claude 트리거 (2.5%→4%)
   claude_vol_noholding: 0.10       # 미보유 (8%→10%)
-  claude_periodic_hold: 7200       # 보유 주기 (1시간→2시간) — Claude 재분석 빈도 절감
-  claude_periodic_noholding: 21600 # 미보유 주기 (4시간→6시간)
+  # 2026-07-21: 주기 소폭 연장 (2h→3h / 6h→8h). 이 주기는 provider 무관하게
+  # 분석 자체를 게이팅하므로 codex 소모 속도도 같이 내려간다.
+  claude_periodic_hold: 10800      # 보유 주기 (2시간→3시간)
+  claude_periodic_noholding: 28800 # 미보유 주기 (6시간→8시간)
   claude_full_only_bleeding: true  # full(4인): 출혈 시만 (vol 7% 트리거 제거)
   claude_websearch_full_only: true  # 복원: 웹검색(=Claude deep research, 호출당 5분)은
                                     # full(드묾, vol≥5%)에만. quick(빈번) 분석은 웹검색 끔 → Max 토큰 절감.
@@ -417,10 +422,12 @@ risk:
   loss_learning_enabled: true
   loss_learning_floor_cap: -0.13      # 가장 깊게 허용(하드스톱 -15% 보다 얕게 — 백스톱 잠식 금지)
   loss_learning_floor_shallow: -0.07  # 가장 얕게 허용
-  # 회복 모드: drawdown 기반 defensive 강제 활성 + 매수 conf 70% 차단 비활성화.
-  # 사용자 요청 — drawdown -22% 상태에서 적극 회복 시도.
-  # 시장 crisis/war에 의한 defensive는 그대로 작동, dd_multiplier 사이즈 축소도 유지
-  defensive_mode_enabled: false
+  # 방어 모드 전체 활성 — drawdown(≤-10%)·뉴스 악재 기반 defensive 강제 활성 포함.
+  # 2026-07-21: false→true 복원. false 동안엔 시장 crisis/war·급락가드만 defensive 를 켰고,
+  # drawdown/뉴스 경로는 죽어 있어 하락장 대응이 설계의 일부만 작동했다.
+  # (false = 회복 모드: drawdown -22% 상태에서 매수 conf 70% 게이트를 풀고 적극 회복 시도.
+  #  이때도 시장 crisis/war defensive·dd_multiplier 사이즈 축소는 그대로였음.)
+  defensive_mode_enabled: true
   # 손익/자산 무결성 점검 (매 사이클, 로컬·API 0) — 버그·상태변조·정산 드리프트 조기 포착.
   # 위반 시 메신저 경고(dedup). halt_buys_on_integrity_violation=true면 위반 시 신규매수만
   # 보수화(매도/안전망은 항상 그대로). integrity_tolerance=자산 정합 허용오차(기본 5%).

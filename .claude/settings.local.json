@@ -6,7 +6,20 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git config *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(systemctl cat *)",
+      "Bash(echo \"rc=$?\")",
+      "Bash(timeout 900 .venv/bin/python tests/test_bot.py)",
+      "Bash(sudo -n systemctl restart zusik)",
+      "Bash(systemctl is-active *)",
+      "Bash(systemctl show *)",
+      "Bash(ps -o pid,etime,cmd -C python)",
+      "Bash(python3 *)",
+      "Bash(git log *)",
+      "Bash(python -c ' *)",
+      "Bash(.venv/bin/python security_lock.py manifest)",
+      "Bash(.venv/bin/python security_lock.py verify)",
+      "Bash(systemctl is-enabled *)"
     ]
   }
 }
