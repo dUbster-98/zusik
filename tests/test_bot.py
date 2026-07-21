@@ -6903,21 +6903,163 @@ class StabilityFeatureTests(unittest.TestCase):
         s._adaptive = types.SimpleNamespace(analyze=lambda d: "hold")
         s._calc_volatility = lambda d: 0.10            # 고변동 → needs_claude
         s._should_periodic_check = lambda i: False
-        calls = {"claude": 0, "adaptive": 0}
-        s._analyze_claude = lambda d, l, v: (calls.__setitem__("claude", calls["claude"] + 1) or "buy")
+        calls = {"claude": 0, "adaptive": 0, "level": ""}
+        s._analyze_claude = lambda d, l, v: (
+            calls.__setitem__("claude", calls["claude"] + 1)
+            or calls.__setitem__("level", l) or "buy")
         s._analyze_adaptive = lambda d, v: (calls.__setitem__("adaptive", calls["adaptive"] + 1) or "hold")
         df = pd.DataFrame({"close": [100, 90]})
 
         s.set_cheap_mode(False)                        # 정상: 출혈 보유 → Claude(4인)
         s.analyze(df)
         self.assertEqual(calls["claude"], 1)
+        self.assertEqual(calls["level"], "full", "평시 출혈 보유 → full(4인)")
 
         calls["claude"] = 0
         calls["adaptive"] = 0
-        s.set_cheap_mode(True)                          # 방어: Claude 끄고 로컬만
+        s.set_cheap_mode(True)                          # 급락: Claude 끄고 로컬만
         s.analyze(df)
         self.assertEqual(calls["claude"], 0, "cheap 모드는 Claude 호출 안 함")
         self.assertEqual(calls["adaptive"], 1, "cheap 모드는 로컬 adaptive 사용")
+
+        # defensive 단독(quick_only): full 만 차단하고 quick 은 유지.
+        # adaptive 로 내리면 로컬 confidence 상한(0.70)이 매수 게이트(conf<0.70)와 같아
+        # 방어가 '전면 정지'로 변질된다 → quick 을 살려 실제 확신도가 나오게 한다.
+        calls["claude"] = 0
+        calls["adaptive"] = 0
+        calls["level"] = ""
+        s.set_cheap_mode(True, quick_only=True)
+        s.analyze(df)
+        self.assertEqual(calls["claude"], 1, "quick_only 는 Claude(quick) 유지")
+        self.assertEqual(calls["adaptive"], 0, "quick_only 는 adaptive 로 안 내림")
+        self.assertEqual(calls["level"], "quick", "출혈이어도 full 대신 quick")
+
+        s.set_cheap_mode(False)                         # 해제 시 두 플래그 모두 off
+        self.assertFalse(s._cheap_mode)
+        self.assertFalse(s._quick_only_mode)
+
+    def _gate_bot(self, analysis, whitelist=("005930",), defensive=True):
+        """_defensive_buy_gate 검증용 최소 봇."""
+        import types
+        from zusik.core.bot import TradingBot
+        b = TradingBot.__new__(TradingBot)
+        b._defensive_mode = defensive
+        b.strategy = types.SimpleNamespace(get_last_analysis=lambda: analysis)
+        b._is_whitelist = lambda s: s in whitelist
+        return b
+
+    def test_defensive_gate_rejects_other_symbols_analysis(self):
+        """종목 불일치 분석으로는 매수 안 함 — 잔금소진/fast_entry 의 교차종목 판정 차단.
+
+        기존엔 5곳이 get_last_analysis()(= 직전에 분석한 아무 종목) 의 확신도를 그대로
+        썼다. 확신도 90% 짜리 A 분석이 남아 있으면 미분석 B 가 통과하던 경로.
+        """
+        a = {"symbol": "000660", "confidence": 0.95}
+        b = self._gate_bot(a)
+        allow, reason = b._defensive_buy_gate("035420", "NAVER")
+        self.assertFalse(allow, "다른 종목 분석이면 확신도가 높아도 차단")
+        self.assertIn("000660", reason, "어떤 종목 분석이 남아있었는지 로그에 남는다")
+
+        allow2, _ = b._defensive_buy_gate("000660", "SK하이닉스")
+        self.assertTrue(allow2, "종목이 일치하고 확신도 충분하면 통과")
+
+    def test_defensive_gate_missing_analysis_blocks(self):
+        """분석 부재 = 확신 없음 = 매수 안 함 (기존엔 0/0.5 로 제각각 해석)."""
+        b = self._gate_bot(None)
+        allow, reason = b._defensive_buy_gate("035420", "NAVER")
+        self.assertFalse(allow)
+        self.assertIn("분석 없음", reason)
+
+    def test_defensive_gate_whitelist_bypass(self):
+        """whitelist 는 defensive 에서도 우회 — _pre_market_buy_gate 와 동일 원칙."""
+        b = self._gate_bot({"symbol": "005930", "confidence": 0.10})
+        allow, reason = b._defensive_buy_gate("005930", "삼성전자")
+        self.assertTrue(allow, "확신도 10% 여도 whitelist 는 통과")
+        self.assertIn("whitelist", reason)
+
+    def test_defensive_gate_uses_explicit_confidence(self):
+        """호출측이 종목별 확신도를 주면 get_last_analysis 를 보지 않는다 (US 강제매수)."""
+        def _boom():
+            raise AssertionError("explicit confidence 인데 get_last_analysis 를 봤다")
+        b = self._gate_bot(None)
+        b.strategy.get_last_analysis = _boom
+        self.assertTrue(b._defensive_buy_gate("NVDA", "NVIDIA", confidence=0.80)[0])
+        self.assertFalse(b._defensive_buy_gate("NVDA", "NVIDIA", confidence=0.60)[0])
+
+    def test_defensive_gate_inactive_and_unsupported_strategy(self):
+        """defensive 아니면 무조건 통과. 확신도 미지원 전략이면 게이트 미적용."""
+        import types
+        b = self._gate_bot({"symbol": "X", "confidence": 0.0}, defensive=False)
+        self.assertTrue(b._defensive_buy_gate("035420", "NAVER")[0], "평시엔 게이트 없음")
+
+        b2 = self._gate_bot(None)
+        b2.strategy = types.SimpleNamespace()   # rsi/macd 등 — get_last_analysis 없음
+        allow, reason = b2._defensive_buy_gate("035420", "NAVER")
+        self.assertTrue(allow, "확신도 개념이 없는 전략은 이 게이트 대상이 아님")
+        self.assertIn("미지원", reason)
+
+    def test_analysis_is_stamped_with_symbol_and_source(self):
+        """auto_hybrid 가 분석 결과에 종목·소스를 각인 — 게이트가 판별할 근거."""
+        import types
+        import pandas as pd
+        from zusik.strategies.auto_hybrid import AutoHybridStrategy
+        s = AutoHybridStrategy.__new__(AutoHybridStrategy)
+        s._claude = None
+        s._claude_ready = False
+        s._cheap_mode = False
+        s._quick_only_mode = False
+        s._current_mode = "adaptive"
+        s._last_analysis = None
+        s._claude_full_only_bleeding = True
+        s._claude_vol_hold = 0.02
+        s._claude_vol_noholding = 0.03
+        s._claude_periodic_hold = 180
+        s._claude_periodic_noholding = 1800
+        s._position_state = {"holding": False}
+        s._adaptive = types.SimpleNamespace(analyze=lambda d: "hold")
+        s._calc_volatility = lambda d: 0.01
+        s._should_periodic_check = lambda i: False
+        s._analyze_adaptive = lambda d, v: (
+            setattr(s, "_last_analysis", {"signal": "buy", "confidence": 0.5}) or "buy")
+
+        s.set_stock("005930", "삼성전자")
+        s.analyze(pd.DataFrame({"close": [100, 101]}))
+        self.assertEqual(s._last_analysis["symbol"], "005930")
+        self.assertEqual(s._last_analysis["source"], "adaptive")
+
+    def test_total_deposits_skips_zero_equity_rows(self):
+        """equity_curve 첫 행이 0원 스냅샷이어도 deposits 가 0 으로 굳지 않는다.
+
+        2026-07-21 실측: 기동 직후 total_equity=0 행이 첫 행이 되어 deposits=0 →
+        effective_equity=0 → effective_dd/pnl 영구 0.0 → dd 기반 리스크 계층
+        (defensive 트리거·_drawdown_multiplier·adaptive 상태머신) 전체가 무력화됐다.
+        """
+        import json
+        import tempfile
+        import zusik.storage.portfolio_tracker as pt
+        tmpdir = tempfile.mkdtemp()
+        orig = (pt.EQUITY_CURVE_FILE, pt.TRADES_FILE, pt.DATA_DIR)
+
+        def _restore():
+            pt.EQUITY_CURVE_FILE, pt.TRADES_FILE, pt.DATA_DIR = orig
+        self.addCleanup(_restore)
+        pt.EQUITY_CURVE_FILE = os.path.join(tmpdir, "equity_curve.json")
+        pt.TRADES_FILE = os.path.join(tmpdir, "trades.json")
+        pt.DATA_DIR = tmpdir
+        with open(pt.EQUITY_CURVE_FILE, "w") as f:
+            json.dump([
+                {"date": "2026-07-15", "total_equity": 0},        # 기동 직후 빈 스냅샷
+                {"date": "2026-07-16", "total_equity": 998017},   # 실제 시드
+                {"date": "2026-07-21", "total_equity": 993636},
+            ], f)
+        t = pt.PortfolioTracker.__new__(pt.PortfolioTracker)
+        self.assertEqual(t.get_total_deposits(), 998017,
+                         "0원 행은 건너뛰고 첫 유효 스냅샷을 입금으로 본다")
+
+        # 명시값(total_deposits.json)이 있으면 그게 최우선 — /입금 명령이 쓰는 경로
+        with open(os.path.join(tmpdir, "total_deposits.json"), "w") as f:
+            json.dump({"manual_total_krw": 1000000}, f)
+        self.assertEqual(t.get_total_deposits(), 1000000, "명시값 우선")
 
     # ── 워치독 전이/복구 (scripts/watchdog.py) ──
     def _load_watchdog(self):

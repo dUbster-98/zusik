@@ -80,6 +80,11 @@ class ClaudeStrategy(Strategy):
             portfolio_info=portfolio_info,
             long_term_info=self._long_term_info,
         )
+        #: 어느 종목 분석인지 각인 — 매수 게이트가 '직전 분석이 다른 종목'인 경우를
+        # 걸러내려면 필요하다(get_last_analysis 는 마지막 1건만 들고 있다).
+        if isinstance(analysis, dict):
+            analysis.setdefault("symbol", self._stock_code)
+            analysis.setdefault("source", "claude")
         self._last_analysis = analysis
 
         if analysis["confidence"] < self.min_confidence:

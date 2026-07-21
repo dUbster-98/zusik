@@ -182,6 +182,26 @@ screening:
     # NVDA 포함 3종으로 올라감 — 섹터 쏠림 감수한 의도적 구성.
     - { ticker: "AMD", name: "AMD", exchange: "NASD" }
     - { ticker: "INTC", name: "Intel", exchange: "NASD" }
+    # QLD(2X 레버리지) → SPY 교체 (2026-07-21). QLD 는 QQQ 의 일간 2배라 분산 효과가
+    # QQQ 와 완전히 동일한데(기존 4종 상관 0.69, 소수점까지 일치) 변동성만 2배였다.
+    # 5년 실측: QQQ +99.3% / QLD +133.7%(1.35배) 인데 최대낙폭은 -35.0% / -63.7%(1.82배)
+    # — 상승은 1.35배만 받고 하락은 1.82배 맞는 decay. 인버스 레버리지를 crisis_only 로
+    # 묶은 근거가 롱 레버리지에도 동일하게 적용된다.
+    # whitelist 는 급락컷 면제 + defensive 확신도 우회 + 상한 25% 라 레버리지와 최악 조합:
+    # 5년간 급락 이벤트가 QLD 27건 vs SPY 3건(scripts/crash_hold_review.py)이었다.
+    # SPY 를 고른 이유: 기존 4종과 상관 0.61 로 QQQ(0.69)보다 낮다 — QQQ 는 NVDA·AAPL 이
+    # 상위 편입이라 이미 보유한 종목을 지수로 한 번 더 사는 셈. SCHD(0.36)가 분산은 더
+    # 좋지만 저변동(14.4%)이라 모멘텀 진입 신호가 드물어 죽은 자본이 되기 쉽다.
+    # SPY 대신 SCHX 인 이유: 계좌 규모. SPY 1주 $745 ≈ 100.6만원 > 총자산(99.4만원)이고
+    # whitelist 상한 25%(≈$184)로는 영원히 못 산다 — 넣어도 죽은 항목이 된다.
+    # SCHX(Schwab US Large-Cap, $29)는 같은 미국 대형주 지수 노출을 1주 4만원에 얻는다.
+    # 5년 실측으로 SPY 와 사실상 동일: 상관 0.65/0.61, 변동성 17.2%/17.6%,
+    # 급락 이벤트 3건/3건(모두 20일 후 중앙 +5.6% 회복 — hold-through 유효).
+    # SCHD(상관 0.36)가 분산은 더 좋지만 저변동(14.4%)이라 모멘텀 진입 신호가 드물어
+    # 죽은 자본이 되기 쉽다. QQQ(0.69)는 NVDA·AAPL 이 상위 편입이라 중복 매수가 된다.
+    # exchange 는 AMEX — KIS 는 이 ETF들을 NYSE/NASD 로 조회하면 빈 결과를 준다(예외 아님).
+    - { ticker: "SCHX", name: "Schwab US Large-Cap ETF", exchange: "AMEX" }
+
   screen_interval_hours: 3  # 2→3 (2026-07-21, AI 사용량 소폭 절감)
   # numpy 자동 스크리닝(감시종목 재랭킹) 주기. 일 1회→4h로 단축해 watch list가
   # 시장 변동을 따라가게. (현금 무관 재랭킹 — 고정 종목이 시장 흐름 무시하던 문제 해결.)

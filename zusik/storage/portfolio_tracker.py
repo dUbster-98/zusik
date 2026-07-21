@@ -164,6 +164,12 @@ class PortfolioTracker:
           1) data/total_deposits.json의 명시값 (사용자 수동 등록)
           2) equity_curve.json의 deposit_today 합
           3) equity_curve.json의 첫 날 total_equity (초기 자산을 입금으로 간주)
+
+        3)에서 total_equity<=0 인 행은 건너뛴다. 봇이 잔고 조회 전(기동 직후)에 남긴
+        0원 스냅샷이 첫 행이면 deposits=0 이 되고, 그러면 effective_equity=0 →
+        effective_drawdown/pnl 이 영구 0.0 으로 굳는다. 그 값에 매달린 리스크 계층
+        (dd≤-10 defensive 트리거, _drawdown_multiplier, adaptive 상태머신)이 전부
+        무력화되는 게 실제로 관측됐다(2026-07-15 첫 행 total_equity=0).
         """
         path = os.path.join(DATA_DIR, "total_deposits.json")
         if os.path.exists(path):
@@ -179,9 +185,12 @@ class PortfolioTracker:
             tracked = sum((c.get("deposit_today") or 0) for c in curve)
             if tracked > 0:
                 return int(tracked)
-            # fallback: 첫 스냅샷의 total_equity를 입금으로 간주
+            # fallback: 첫 스냅샷의 total_equity를 입금으로 간주 (0원 행은 무시)
             sorted_curve = sorted(curve, key=lambda c: c.get("date", ""))
-            return int(sorted_curve[0].get("total_equity", 0))
+            for c in sorted_curve:
+                eq = int(c.get("total_equity", 0) or 0)
+                if eq > 0:
+                    return eq
         return 0
 
     def get_effective_pnl_summary(self, total_equity_now: int,

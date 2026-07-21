@@ -277,6 +277,56 @@ class RiskExitMixin:
             self._defensive_mode = True
             logger.info("뉴스 악재 감지 → defensive 모드 (신규 매수 조임, 보유는 유지)")
 
+    #: defensive 신규 매수 확신도 임계 — Claude 합의 확신도 스케일 기준.
+    # 로컬 adaptive 는 _backtest_confidence 클램프로 상한이 같은 0.70 이라 스케일이
+    # 다르다(소스별 임계 분리는 실측 분포 확보 후 별도 작업).
+    DEFENSIVE_MIN_CONFIDENCE = 0.70
+
+    def _defensive_buy_gate(self, symbol: str, name: str = "",
+                            confidence: float | None = None) -> tuple[bool, str]:
+        """defensive 모드 신규 매수 허용 여부 — (allow, reason).
+
+        이전엔 5곳이 각자 get_last_analysis()["confidence"] 를 0.70 과 비교했고, 두 가지가
+        틀려 있었다:
+          1) get_last_analysis() 는 '직전에 분석한 아무 종목'이다. 잔금소진·fast_entry
+             경로는 다른 종목의 확신도로 판정했다(종목 불일치).
+          2) 분석 부재를 어디선 0(무조건 차단), 어디선 0.5 로 해석했고, use_claude=False
+             면 로컬 전략이 낸 확신도를 아예 무시했다.
+        → 여기로 일원화. 종목이 일치하는 분석만 신뢰하고, 판단이 없으면 '확신 없음 =
+          매수 안 함'으로 통일한다(defensive 의 취지 그대로).
+
+        whitelist 는 우회한다 — _pre_market_buy_gate 와 같은 원칙(사용자 명시 핵심 종목).
+        confidence 를 넘기면 그 값을 그대로 쓴다(호출측이 이미 종목별 확신도를 가진 경우).
+        """
+        if not getattr(self, "_defensive_mode", False):
+            return True, ""
+        thr = float(getattr(self, "DEFENSIVE_MIN_CONFIDENCE", 0.70))
+        label = name or symbol
+
+        if confidence is None:
+            getter = getattr(self.strategy, "get_last_analysis", None)
+            if getter is None:
+                # 확신도 개념이 없는 전략(rsi/macd 등) — 이 게이트는 적용 대상이 아니다.
+                return True, "확신도 미지원 전략 — defensive 확신 게이트 미적용"
+            try:
+                analysis = getter() or {}
+            except Exception:
+                analysis = {}
+            if not analysis:
+                return False, f"{label}: 분석 없음 — 확신 없이는 매수 안 함"
+            a_sym = analysis.get("symbol", "")
+            if symbol and a_sym and a_sym != symbol:
+                return False, (f"{label}: 이 종목 분석 아님 (직전 분석 {a_sym}) — "
+                               f"확신 없이는 매수 안 함")
+            confidence = analysis.get("confidence", 0)
+
+        conf = float(confidence or 0)
+        if symbol and self._is_whitelist(symbol):
+            return True, f"{label}: whitelist 우회 (확신도 {conf * 100:.0f}%)"
+        if conf < thr:
+            return False, f"{label}: 확신도 {conf * 100:.0f}% < {thr * 100:.0f}%"
+        return True, f"{label}: 확신도 {conf * 100:.0f}%"
+
     def _check_risks_before_trading(self, market: str = "") -> bool:
         """매매 전: 시장 감지 + 자산 평가 + 모드 자동 전환. False면 매매 중단.
 
@@ -355,14 +405,19 @@ class RiskExitMixin:
                 except Exception:
                     pass
 
-        # 비용 절감: 방어/급락 모드면 전략을 로컬(adaptive)로 다운그레이드(비싼 Claude/4인 분석 OFF).
-        # 매수는 확신 게이트에 막혀 어차피 안 사고, 보유 관리는 로컬 안전망이 담당 → 비싼 AI 낭비.
-        # 크래시일수록 보유가 다 출혈→full 4인 분석 폭증(=agy/claude 소진)하던 비용원을 차단.
+        # 비용 절감 — 강도를 국면별로 분리(defensive ≠ 급락).
+        #  급락가드/crisis/war: 전략을 로컬(adaptive)로 완전 다운그레이드. 신규 매수 자체를
+        #    막는 국면이라 AI 판단이 낭비고, 보유 관리는 로컬 안전망이 담당.
+        #  defensive 단독(drawdown·뉴스악재·tension): quick 은 살리고 full(4인·웹검색)만 차단.
+        #    adaptive 로 내리면 로컬 confidence 상한(0.70)이 매수 게이트(conf<0.70)와 같아
+        #    '보수화'가 '전면 정지'로 변질된다 — set_cheap_mode 독스트링 참조.
         if hasattr(self.strategy, "set_cheap_mode"):
             try:
-                self.strategy.set_cheap_mode(
-                    bool(getattr(self, "_defensive_mode", False)
-                         or getattr(self, "_fast_fall_active", False)))
+                defensive_on = bool(getattr(self, "_defensive_mode", False))
+                hard_off = bool(getattr(self, "_fast_fall_active", False)
+                                or market_condition in ("crisis", "war"))
+                self.strategy.set_cheap_mode(defensive_on or hard_off,
+                                             quick_only=not hard_off)
             except Exception:
                 pass
 

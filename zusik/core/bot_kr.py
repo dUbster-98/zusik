@@ -134,12 +134,10 @@ class KRTradingMixin:
         elif getattr(self, "_fast_fall_active", False):
             logger.info("급락 가드 — 신규 매수 중단 (%s): %s", self._market_condition, name)
             return
-        elif getattr(self, "_defensive_mode", False):
-            analysis = self.strategy.get_last_analysis() or {}
-            conf = analysis.get("confidence", 0) or 0
-            if conf < 0.70:
-                logger.info("보수 모드(%s): 확신도 %.0f%% < 70%% → 매수 보류 (%s)",
-                            self._market_condition, conf * 100, name)
+        else:
+            allow_def, def_reason = self._defensive_buy_gate(code, name)
+            if not allow_def:
+                logger.info("보수 모드(%s) 매수 보류 — %s", self._market_condition, def_reason)
                 return
         balance = self.client.get_balance()
         # KIS의 'cash'(orderable_cash)는 매도 즉시 재사용 가능분(sll_ruse)을 이미 반영.

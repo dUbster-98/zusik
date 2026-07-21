@@ -750,10 +750,10 @@ class SelectionMixin:
                     if not allow_pm2:
                         logger.info("KR 잔금 소진 차단 (%s): %s", name, pm_reason2)
                         return
-                    if getattr(self, "_defensive_mode", False) and conf2 < 0.70:
-                        logger.info("KR 잔금 소진 차단 (defensive, %s): 확신도 %.0f%% < 70%%",
-                                    name, conf2 * 100)
-                        return
+                    #: defensive 확신 게이트는 여기서 걸지 않는다 — 아래 루프가 대체 종목을
+                    # set_stock+analyze 로 개별 분석한 뒤 _handle_buy 를 타고, 거기서
+                    # _defensive_buy_gate 가 '그 종목의' 확신도로 판정한다. 여기서 원래
+                    # 종목(code)의 확신도로 막으면 종목 불일치 판정이 된다.
                     logger.info("잔여금 %s원, %s(주당%s원) 매수 불가 → 다른 종목 탐색",
                                 f"{remaining:,}", name, f"{price:,}")
                     from zusik.analysis.indicators import slow_bleed as _sb, momentum_score as _ms

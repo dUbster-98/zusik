@@ -69,15 +69,26 @@ class AutoHybridStrategy(Strategy):
         self._current_mode = "adaptive"
         self._last_analysis = None
         self._cheap_mode = False
+        self._quick_only_mode = False
 
-    def set_cheap_mode(self, on: bool):
-        """방어/급락 모드: Claude(4인 full / quick) 분석을 끄고 로컬 adaptive 로만 판단.
+    def set_cheap_mode(self, on: bool, quick_only: bool = False):
+        """비용 절감 모드 — 2단계.
 
-        이 모드에선 신규 매수가 확신 게이트(70%)·현금부족에 막혀 어차피 안 사고, 보유 관리는
-        로컬 안전망(급락/트레일링/본전/출혈/하드스톱)이 담당한다. 크래시일수록 보유 종목이 다
-        출혈→매 사이클 full 4인 분석 폭증(=비용 폭증)하던 것을 차단. 비싼 AI 분석이 순수 낭비.
+        quick_only=False (급락가드 등 '진짜 급락'): Claude(full/quick) 전부 끄고 로컬
+        adaptive 로만 판단. 크래시일수록 보유가 다 출혈→매 사이클 full 4인 분석 폭증
+        (=비용 폭증)하던 것을 차단. 이 국면은 신규 매수 자체를 막으므로 AI 판단이 낭비다.
+
+        quick_only=True (defensive 단독): full(4인)만 끄고 quick 은 유지한다.
+        adaptive 의 로컬 confidence 는 [0.40, 0.70] 클램프(_backtest_confidence)라
+        상한이 defensive 매수 게이트(conf<0.70 차단)와 같은 값이다 → adaptive 로
+        내려보내면 '보수화'가 사실상 '전면 정지'가 된다(과거 라이브 회귀: 장전 cautious
+        요구 0.55 에 로컬 0.50 고정 → 후보 전원 차단). quick 을 살려 실제 확신도가
+        나오게 하고, 비용 큰 full(4인·웹검색)만 차단해 절감 목적은 유지한다.
         """
-        self._cheap_mode = bool(on)
+        on = bool(on)
+        quick_only = bool(quick_only)
+        self._cheap_mode = on and not quick_only
+        self._quick_only_mode = on and quick_only
 
     @property
     def analyst(self):
@@ -87,6 +98,9 @@ class AutoHybridStrategy(Strategy):
         return None
 
     def set_stock(self, code: str, name: str = ""):
+        #: _symbol 은 _last_analysis 각인용 — 매수 게이트가 '이 종목의 분석'인지
+        # 구분하려면 필요하다(직전 분석이 다른 종목이면 확신도를 쓰면 안 됨).
+        self._symbol = code
         if self._claude:
             self._claude.set_stock(code, name)
 
@@ -146,14 +160,30 @@ class AutoHybridStrategy(Strategy):
         if needs_claude and self._claude_ready and not getattr(self, "_cheap_mode", False):
             # full(4인): 출혈 시만: vol≥7%→full 제거로 4인 버스트 절감).
             # claude_full_only_bleeding=false면 기존처럼 변동성 7%+도 full.
-            if self._claude_full_only_bleeding:
+            if getattr(self, "_quick_only_mode", False):
+                level = "quick"   # defensive: 비싼 full 만 차단, 확신도는 살린다
+            elif self._claude_full_only_bleeding:
                 level = "full" if is_bleeding else "quick"
             else:
                 level = "full" if (is_bleeding or volatility >= 0.07) else "quick"
-            claude_signal = self._analyze_claude(df, level, volatility)
-            return claude_signal
+            signal = self._analyze_claude(df, level, volatility)
         else:
-            return self._analyze_adaptive(df, volatility)
+            signal = self._analyze_adaptive(df, volatility)
+        self._stamp_analysis()
+        return signal
+
+    def _stamp_analysis(self):
+        """_last_analysis 에 '어느 종목을·무엇으로 분석했는지' 각인.
+
+        symbol: 매수 게이트가 종목 불일치(직전 분석 유용)를 판별하는 근거.
+        source: adaptive / claude_quick / claude_full — confidence 의 스케일이 다르다
+                (로컬은 _backtest_confidence 클램프로 상한 0.70). 임계를 소스별로
+                나누려면 소비측이 출처를 알아야 한다.
+        """
+        analysis = getattr(self, "_last_analysis", None)
+        if isinstance(analysis, dict):
+            analysis["symbol"] = getattr(self, "_symbol", "") or ""
+            analysis["source"] = getattr(self, "_current_mode", "")
 
     def _should_periodic_check(self, interval_sec: int = 900) -> bool:
         """주기적 Claude 분석. 손실 보유 중이면 짧은 간격으로 재판단."""

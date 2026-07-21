@@ -643,9 +643,10 @@ class USTradingMixin:
             if not allow_pm:
                 logger.info("US 잔여 소진 차단 (%s): %s", name, pm_reason)
                 return
-            if getattr(self, "_defensive_mode", False) and conf < 0.70:
-                logger.info("US 잔여 소진 차단 (defensive, %s): 확신도 %.0f%% < 70%%", name, conf*100)
-                return
+            #: defensive 확신 게이트는 여기(원래 종목 기준)가 아니라 실제 매수 직전에
+            # 종목별로 건다 — 아래 대체 종목(alt) 루프는 다른 종목을 사므로 ticker 의
+            # 확신도로 판정하면 안 된다. 이 경로는 _handle_us_buy 를 거치지 않고
+            # buy_us_limit 을 직접 호출하므로 각 분기에 게이트가 필요하다.
             # 재진입 차단 / 일일 매도 한도 검증 — 4/29 RIOT churn loop 핵심 fix
             blocked, br = self._is_reentry_blocked(ticker)
             if blocked:
@@ -666,7 +667,10 @@ class USTradingMixin:
                 mom_min = float((self.config.get("position", {}) or {}).get("leftover_momentum_min", 0.10))
                 # 이 종목이 buy/hold + 현재 종목 모멘텀이 바를 넘을 때만 추가 매수.
                 # 평평하면(미달) 아래 else 로 떨어져 '움직이는' 대체 종목을 찾고, 그것도 없으면 현금 유지.
-                if (signal in ("buy", "long_term_buy", "hold")
+                allow_cur, cur_reason = self._defensive_buy_gate(ticker, name)
+                if not allow_cur:
+                    logger.debug("US 잔여 소진 추가매수 보류 (defensive) — %s", cur_reason)
+                if (signal in ("buy", "long_term_buy", "hold") and allow_cur
                         and remaining_usd >= price > 0 and self._leftover_momentum_ok(df)):
                     add_qty = int(remaining_usd / (price * 1.005))
                     if add_qty >= 1:
@@ -697,6 +701,13 @@ class USTradingMixin:
                         allow_alt, alt_pm = self._pre_market_buy_gate("US", conf, symbol=at)
                         if not allow_alt:
                             logger.debug("US 잔여 소진 후보 %s 제외: %s", at, alt_pm)
+                            continue
+                        #: 대체 종목은 이 경로에서 분석하지 않는다 → defensive 면 확신 없음
+                        # 으로 차단(whitelist 는 통과). 미분석 종목에 자투리를 넣는 건
+                        # defensive 가 막으려는 바로 그 저확신 매수다.
+                        allow_alt_def, alt_def = self._defensive_buy_gate(at, alt.get("name", at))
+                        if not allow_alt_def:
+                            logger.debug("US 잔여 소진 후보 제외 (defensive) — %s", alt_def)
                             continue
                         # 재진입 차단된 종목은 잔여 소진 후보에서도 제외
                         alt_blocked, alt_br = self._is_reentry_blocked(at)
@@ -835,12 +846,10 @@ class USTradingMixin:
         elif getattr(self, "_fast_fall_active", False):
             logger.info("급락 가드 — US 신규 매수 중단 (%s): %s", self._market_condition, name)
             return
-        elif getattr(self, "_defensive_mode", False):
-            analysis = self.strategy.get_last_analysis() or {}
-            conf = analysis.get("confidence", 0) or 0
-            if conf < 0.70:
-                logger.info("US 보수 모드(%s): 확신도 %.0f%% < 70%% → 매수 보류 (%s)",
-                            self._market_condition, conf * 100, name)
+        else:
+            allow_def, def_reason = self._defensive_buy_gate(ticker, name)
+            if not allow_def:
+                logger.info("US 보수 모드(%s) 매수 보류 — %s", self._market_condition, def_reason)
                 return
         try:
             us_balance = self.client.get_us_balance()
@@ -1293,9 +1302,12 @@ class USTradingMixin:
                         continue
                     # 보수/쿨다운 국면엔 유휴 현금 해소보다 현금 유지 — 일반 매수 경로와 동일 기준
                     fb_conf = uc.get("confidence", 0)
-                    if getattr(self, "_defensive_mode", False) and fb_conf < 0.70:
-                        logger.info("US 강제매수 보류 (%s): defensive 확신도 %.0f%% < 70%%",
-                                    uc["name"], fb_conf * 100)
+                    #: 후보 dict 가 이미 종목별 확신도를 들고 있으므로 그대로 넘긴다
+                    # (get_last_analysis 조회 불필요 — 종목 불일치 위험 없음).
+                    allow_fb, fb_reason = self._defensive_buy_gate(
+                        uc["ticker"], uc["name"], confidence=fb_conf)
+                    if not allow_fb:
+                        logger.info("US 강제매수 보류 (defensive) — %s", fb_reason)
                         continue
                     if getattr(self, "_daily_target_cooldown", False) and fb_conf < self.daily_target_min_confidence:
                         logger.info("US 강제매수 보류 (%s): 일일 목표 쿨다운 확신도 %.0f%% < %.0f%%",

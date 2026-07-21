@@ -129,6 +129,8 @@ class DiscordCommander:
                 return self._handle_loss_release()
             elif action == "성과" or action == "수익":
                 return self._handle_performance()
+            elif action == "입금" or action == "deposit":
+                return self._handle_deposit(parts[1:])
             elif action == "헬스" or action == "health":
                 return self._handle_health()
             elif action == "점검" or action == "healthcheck":
@@ -143,6 +145,70 @@ class DiscordCommander:
             return f"명령 실행 오류: {e}"
 
     # ── 성과 요약 ──
+
+    def _handle_deposit(self, args: list) -> str:
+        """누적 입금액 조회/설정 — data/total_deposits.json 의 manual_total_krw.
+
+        이 값은 effective_equity(=입금+실현+평가) 의 기준선이라 dd/pnl 게이트 전체가
+        여기에 매달린다. 시드를 추가할 때마다 갱신해야 drawdown 계층이 실제 값을 본다.
+
+          /입금            → 현재 누적 입금 조회
+          /입금 3000000    → 누적 입금을 3,000,000원으로 설정
+          /입금 +500000    → 500,000원 증액 (시드 추가)
+          /입금 -200000    → 200,000원 감액 (출금)
+
+        auto_detect(config.deposits) 는 오탐 이력 때문에 기본 OFF — 이 명령이 정식 경로다.
+        """
+        DEPOSITS_FILE = os.path.join("data", "total_deposits.json")
+        data = {"manual_total_krw": 0, "history": []}
+        if os.path.exists(DEPOSITS_FILE):
+            try:
+                with open(DEPOSITS_FILE, encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data = loaded
+            except Exception as e:
+                return f"total_deposits.json 읽기 실패: {e}"
+        current = int(data.get("manual_total_krw", 0) or 0)
+
+        if not args:
+            try:
+                dd = self.bot.tracker.get_effective_drawdown()
+                pnl = self.bot.tracker.get_effective_pnl_pct()
+                extra = f"\n실효 손익 {pnl:+.2f}% / drawdown {dd:.2f}%"
+            except Exception:
+                extra = ""
+            return f"누적 입금: {current:,}원{extra}\n변경: /입금 3000000 또는 /입금 +500000"
+
+        raw = args[0].replace(",", "").replace("원", "")
+        try:
+            amount = int(raw)
+        except ValueError:
+            return f"금액 파싱 실패: '{args[0]}' — 예) /입금 3000000, /입금 +500000"
+
+        relative = raw[0] in "+-"
+        new_total = current + amount if relative else amount
+        if new_total < 0:
+            return f"누적 입금이 음수가 됩니다 ({current:,} → {new_total:,}) — 취소"
+
+        data["manual_total_krw"] = new_total
+        data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data.setdefault("history", []).append({
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "amount": int(new_total - current),
+            "market": "MANUAL",
+            "note": f"/입금 명령 ({current:,} → {new_total:,})",
+        })
+        try:
+            with open(DEPOSITS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return f"저장 실패: {e}"
+
+        # dd/pnl 캐시(_adapt_cache)는 10분 TTL — 다음 사이클부터 새 기준선 반영.
+        logger.info("누적 입금 갱신: %s → %s원", f"{current:,}", f"{new_total:,}")
+        return (f"누적 입금 {current:,} → **{new_total:,}원** ({new_total - current:+,})\n"
+                f"실효 손익/drawdown 기준선이 갱신됩니다 (최대 10분 캐시 후 반영)")
 
     def _handle_performance(self) -> str:
         """누적 실효 성과 + 매도 패턴/타이밍 + 선택 alpha 요약 (Discord/Telegram 텍스트).
@@ -635,6 +701,7 @@ class DiscordCommander:
 **조회**
 /상태 — 자산·모드·시장온도·보유
 /성과 — 누적 실효 수익·승률·매도 패턴/타이밍·선택 alpha
+/입금 — 누적 입금 조회 · /입금 +500000 — 시드 추가 반영 (손익·drawdown 기준선)
 /종목 — 자동선별된 감시 종목 (수동 추가/제거는 자동선별이 덮어써 미지원)
 
 **매매**

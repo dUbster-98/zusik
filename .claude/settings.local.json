@@ -19,7 +19,12 @@
       "Bash(python -c ' *)",
       "Bash(.venv/bin/python security_lock.py manifest)",
       "Bash(.venv/bin/python security_lock.py verify)",
-      "Bash(systemctl is-enabled *)"
+      "Bash(systemctl is-enabled *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(awk 'NR>=758 && NR<=870 && /_handle_buy/ {print NR\": \"$0}' zusik/core/bot_selection.py)",
+      "Bash(awk 'NR>=690 && NR<=790 && /_handle_us_buy/ {print NR\": \"$0}' zusik/core/bot_us.py)",
+      "Bash(journalctl -u zusik --since \"-15 min\" --no-pager)",
+      "Bash(grep -vE \"^\\\\s*$\")"
     ]
   }
 }
